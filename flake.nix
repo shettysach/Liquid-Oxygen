@@ -23,7 +23,7 @@
             ghc
             cabal-install
             haskell-language-server
-            hlint # Linter for Haskell
+            hlint
             haskellPackages.fourmolu
           ];
         };
