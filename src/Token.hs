@@ -1,11 +1,5 @@
 module Token where
 
-type IdentifierLiteral = String
-
-type StringLiteral = String
-
-type NumberLiteral = Double
-
 type Token = (TokenType, Int)
 
 data TokenType
@@ -31,9 +25,9 @@ data TokenType
   | Less
   | LessEqual
   | -- Literals.
-    Identifier IdentifierLiteral
-  | NumberToken NumberLiteral
-  | StringToken StringLiteral
+    Identifier String
+  | NumberToken Double
+  | StringToken String
   | -- Keywords.
     And
   | Class

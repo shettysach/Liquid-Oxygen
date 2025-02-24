@@ -1,4 +1,6 @@
 fun main() {
-    var x = 42;
+    var name = 42.0 / 10.0;
+    // Comment
     print "Hello, world!";
+    print name;
 }
