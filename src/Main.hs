@@ -1,4 +1,4 @@
-import Scanner
+import Scanner (scan)
 
 main :: IO ()
 main = do

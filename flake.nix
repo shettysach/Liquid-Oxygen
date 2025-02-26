@@ -25,6 +25,7 @@
             haskell-language-server
             hlint
             haskellPackages.fourmolu
+            stylish-haskell
           ];
         };
       }
