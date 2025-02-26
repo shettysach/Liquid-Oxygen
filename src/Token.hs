@@ -26,13 +26,13 @@ data TokenType
   | LessEqual
   | -- Literals.
     Identifier String
-  | NumberToken Double
-  | StringToken String
+  | Number' Double
+  | String' String
   | -- Keywords.
     And
   | Class
   | Else
-  | FalseToken
+  | False'
   | Fun
   | For
   | If
@@ -42,7 +42,7 @@ data TokenType
   | Return
   | Super
   | This
-  | TrueToken
+  | True'
   | Var
   | While
   | Eof

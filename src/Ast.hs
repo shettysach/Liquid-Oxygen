@@ -1,23 +1,42 @@
-module AST where
+module Ast where
 
-data Expression
-  = LiteralExpression Literal
-  | UnaryOperator Expression
-  | BinaryOperator Expression Expression
-  | Grouping
+data Stmt
+  = Expr Expr
+  | Print Expr
+  | Var String (Maybe Expr)
+  | Block [Stmt]
+  | If Expr Stmt (Maybe Stmt)
+  | While Expr Stmt
+  | Function String [String] [Stmt]
+  | Return (Maybe Expr)
+  deriving (Show)
 
-data Literal = NumberLit | StringLit | TrueLit | FalseLit | NilLit
+data Expr
+  = Literal Literal
+  | Variable String
+  | Assign String Expr
+  | Unary UnaryOp Expr
+  | Binary Expr BinaryOp Expr
+  | Grouping Expr
+  deriving (Show)
 
-data UnaryOperator = Minus' | Bang
+data Literal = Number' Double | String' String | Bool' Bool | Nil
+  deriving (Show)
 
-data BinaryOperator
+data UnaryOp = Minus' | Bang
+  deriving (Show)
+
+data BinaryOp
   = Slash
   | Star
   | Plus
   | Minus
+  | And
+  | Or
   | Greater
   | GreaterEqual
   | Less
   | LessEqual
-  | Equal
+  | EqualEqual
   | BangEqual
+  deriving (Show)

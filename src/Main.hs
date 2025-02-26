@@ -1,5 +1,3 @@
-module Main where
-
 import Scanner
 
 main :: IO ()
@@ -8,5 +6,5 @@ main = do
   putStrLn input
 
   case scan input of
-    Left err -> putStrLn ("Error: " ++ err)
+    Left err -> print err
     Right tokens -> putStrLn $ unlines (map show tokens)

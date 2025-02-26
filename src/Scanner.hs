@@ -3,50 +3,66 @@ module Scanner where
 import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Token
 
-scan :: String -> Either String [Token]
+data ScanError = ScanError
+  { error :: String
+  , line :: Int
+  , lexeme :: String
+  }
+  deriving (Show)
+
+scan :: String -> Either ScanError [Token]
 scan source = scanTokens source 1
 
-scanTokens :: String -> Int -> Either String [Token]
+scanTokens :: String -> Int -> Either ScanError [Token]
 scanTokens [] line = Right [(Eof, line)]
-scanTokens source@(curr : rest) line
+scanTokens chars@(c : cs) line
   -- Keywords and identifiers
-  | isAlpha curr || curr == '_' = do
-      let (lexeme, rest') = span (\c -> isAlphaNum c || c == '_') source
-      ((scanLexeme lexeme, line) :) <$> scanTokens rest' line
+  | isAlpha c || c == '_' = do
+      let validChars c' = isAlphaNum c' || c' == '_'
+      let (lexeme, cs') = span validChars chars
+      let token = (scanLexeme lexeme, line)
+      (token :) <$> scanTokens cs' line
+
   -- Numbers
-  | isDigit curr = do
-      let (lexeme, rest') = span (\c -> isDigit c || c == '.') source
+  | isDigit c = do
+      let validChars c' = isDigit c' || c' == '.'
+      let (lexeme, cs') = span validChars chars
       if (length . filter (== '.') $ lexeme) > 1
-        then Left $ "Invalid number format at line " ++ show line ++ " - " ++ lexeme
-        else ((NumberToken . read $ lexeme, line) :) <$> scanTokens rest' line
-  -- Whitespaces
-  | curr `elem` [' ', '\t', '\r'] = scanTokens rest line
-  -- Newline
-  | curr == '\n' = scanTokens rest (line + 1)
+        then Left (ScanError "Invalid number format" line lexeme)
+        else do
+          let token = (Number' . read $ lexeme, line)
+          (token :) <$> scanTokens cs' line
+
   -- Strings
-  | curr == '"' = do
-      let (lexeme, rest') = span (/= '"') rest
-      if null rest'
-        then Left $ "Unterminated string at line " ++ show line ++ " - " ++ takeWhile (/= '\n') lexeme
-        else ((StringToken lexeme, line) :) <$> scanTokens (tail rest') line
+  | c == '"' = do
+      let (lexeme, cs') = span (/= '"') cs
+      if null cs'
+        then Left $ ScanError "Unterminated string" line $ takeWhile (/= '\n') lexeme
+        else do
+          let token = (String' lexeme, line)
+          (token :) <$> scanTokens (drop 1 cs') line
+
+  -- Whitespaces
+  | c `elem` [' ', '\t', '\r'] = scanTokens cs line
+  -- Newline
+  | c == '\n' = scanTokens cs (line + 1)
   -- Division and comments
-  | curr == '/' =
-      case rest of
-        '/' : rest' -> scanTokens (dropWhile (/= '\n') rest') line
-        _ -> ((Slash, line) :) <$> scanTokens rest line
-  -- Symbols
+  | c == '/' =
+      case cs of
+        '/' : cs' -> scanTokens (dropWhile (/= '\n') cs') line
+        _ -> ((Slash, line) :) <$> scanTokens cs line
+  -- Single and double char tokens
   | otherwise =
-      let lexeme = scanSymbol source
-       in case lexeme of
-            Nothing -> Left $ "Unidentified token " ++ show curr ++ " at line " ++ show line
-            Just (symbol, rest') -> ((symbol, line) :) <$> scanTokens rest' line
+      case scanSymbol chars of
+        Nothing -> Left (ScanError "Unidentified token" line [c])
+        Just (tokenType, cs') -> ((tokenType, line) :) <$> scanTokens cs' line
 
 scanLexeme :: String -> TokenType
 scanLexeme lexeme = case lexeme of
   "and" -> And
   "class" -> Class
   "else" -> Else
-  "false" -> FalseToken
+  "false" -> False'
   "fun" -> Fun
   "for" -> For
   "if" -> If
@@ -56,14 +72,14 @@ scanLexeme lexeme = case lexeme of
   "return" -> Return
   "super" -> Super
   "this" -> This
-  "true" -> TrueToken
+  "true" -> True'
   "var" -> Var
   "while" -> While
   _ -> Identifier lexeme
 
 scanSymbol :: String -> Maybe (TokenType, String)
-scanSymbol (c0 : c1 : rest) | Just tokenType <- scanDoubleChar c0 c1 = Just (tokenType, rest)
-scanSymbol (c : rest) | Just tokenType <- scanSingleChar c = Just (tokenType, rest)
+scanSymbol (c0 : c1 : cs) | Just tokenType <- scanDoubleChar c0 c1 = Just (tokenType, cs)
+scanSymbol (c : cs) | Just tokenType <- scanSingleChar c = Just (tokenType, cs)
 scanSymbol _ = Nothing
 
 scanDoubleChar :: Char -> Char -> Maybe TokenType
