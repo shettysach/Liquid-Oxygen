@@ -13,15 +13,15 @@ data Stmt
 
 data Expr
   = Literal Literal
-  | Variable String
-  | Assign String Expr
-  | Unary UnaryOp Expr
-  | Binary Expr BinaryOp Expr
+  | -- | Variable String
+    -- | Assign String Expr
+    Unary UnaryOp Expr
+  | Binary BinaryOp Expr Expr
   | Grouping Expr
   deriving (Show)
 
 data Literal = Number' Double | String' String | Bool' Bool | Nil
-  deriving (Show)
+  deriving (Show, Eq)
 
 data UnaryOp = Minus' | Bang
   deriving (Show)

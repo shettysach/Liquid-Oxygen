@@ -46,4 +46,4 @@ data TokenType
   | Var
   | While
   | Eof
-  deriving (Show, Eq)
+  deriving (Show)
