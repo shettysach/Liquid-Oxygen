@@ -4,6 +4,7 @@ data Stmt
   = Expr Expr
   | Print Expr
   | Var String (Maybe Expr)
+  | Assign String Expr
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
@@ -13,9 +14,7 @@ data Stmt
 
 data Expr
   = Literal Literal
-  | -- | Variable String
-    -- | Assign String Expr
-    Unary UnaryOp Expr
+  | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
   | Grouping Expr
   deriving (Show)

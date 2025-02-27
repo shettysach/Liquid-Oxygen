@@ -11,7 +11,7 @@ data ParseError = ParseError
   deriving (Show)
 
 parse :: [Token] -> Either ParseError Expr
-parse = fmap fst . expression
+parse = fmap fst . equality
 
 expression :: [Token] -> Either ParseError (Expr, [Token])
 expression = equality

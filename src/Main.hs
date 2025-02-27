@@ -7,15 +7,18 @@ main = do
   input <- readFile "source.lox"
   putStrLn input
 
+  putStrLn "SCAN"
   case scan input of
     Left err -> print err
     Right tokens -> do
-      putStrLn "SCAN"
       putStrLn $ unlines (map show tokens)
+      putStrLn "PARSE"
       case parse tokens of
         Left err -> print err
         Right expr -> do
-          putStrLn "PARSE"
           print expr
           putStrLn "\nEVALUATE"
-          print (evaluate expr)
+          case evaluate expr of
+            Left err -> print err
+            Right lit -> do
+              print lit
