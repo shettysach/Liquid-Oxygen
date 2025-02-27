@@ -57,12 +57,12 @@ scanTokens chars@(c : cs) line
            in (token :) <$> scanTokens cs line
   -- Single and double char tokens
   | otherwise =
-      case cs of
+      case chars of
         c' : c'' : cs'
           | Just tokenType <- scanDoubleChar c' c'' ->
               let token = (tokenType, line)
                in (token :) <$> scanTokens cs' line
-        _ : _
+        _c : _cs
           | Just tokenType <- scanSingleChar c ->
               let token = (tokenType, line)
                in (token :) <$> scanTokens cs line

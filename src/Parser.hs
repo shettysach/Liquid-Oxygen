@@ -9,6 +9,12 @@ data ParseError = ParseError
   }
   deriving (Show)
 
+parse :: [Token] -> Either ParseError Expr
+parse = fmap fst . expression
+
+expression :: [Token] -> Either ParseError (Expr, [Token])
+expression = equality
+
 -- Binary
 
 equality :: [Token] -> Either ParseError (Expr, [Token])
@@ -18,15 +24,15 @@ equality tokens = do
  where
   equality' :: Expr -> [Token] -> Either ParseError (Expr, [Token])
   equality' expr' [] = Right (expr', [])
-  equality' expr' tokens@(t : ts) =
-    if fst t `elem` [T.BangEqual, T.EqualEqual]
-      then do
-        (right, rest') <- comparison ts
-        let op = case fst t of
-              T.BangEqual -> A.BangEqual
-              T.EqualEqual -> A.EqualEqual
-        equality' (Binary expr' op right) rest'
-      else Right (expr', tokens)
+  equality' expr' tokens'@(t : ts) =
+    case fst t of
+      T.BangEqual -> recurse A.BangEqual
+      T.EqualEqual -> recurse A.EqualEqual
+      _ -> Right (expr', tokens')
+   where
+    recurse op = do
+      (right, rest') <- comparison ts
+      equality' (Binary expr' op right) rest'
 
 comparison :: [Token] -> Either ParseError (Expr, [Token])
 comparison tokens = do
@@ -35,17 +41,17 @@ comparison tokens = do
  where
   comparison' :: Expr -> [Token] -> Either ParseError (Expr, [Token])
   comparison' expr' [] = Right (expr', [])
-  comparison' expr' tokens@(t : ts) =
-    if fst t `elem` [T.Less, T.LessEqual, T.Greater, T.GreaterEqual]
-      then do
-        (right, rest') <- term ts
-        let op = case fst t of
-              T.Greater -> A.Greater
-              T.GreaterEqual -> A.GreaterEqual
-              T.Less -> A.Less
-              T.LessEqual -> A.LessEqual
-        comparison' (Binary expr' op right) rest'
-      else Right (expr', tokens)
+  comparison' expr' tokens'@(t : ts) =
+    case fst t of
+      T.Greater -> recurse A.Greater
+      T.GreaterEqual -> recurse A.GreaterEqual
+      T.Less -> recurse A.Less
+      T.LessEqual -> recurse A.LessEqual
+      _ -> Right (expr', tokens')
+   where
+    recurse op = do
+      (right, rest') <- term ts
+      comparison' (Binary expr' op right) rest'
 
 term :: [Token] -> Either ParseError (Expr, [Token])
 term tokens = do
@@ -54,15 +60,15 @@ term tokens = do
  where
   term' :: Expr -> [Token] -> Either ParseError (Expr, [Token])
   term' expr' [] = Right (expr', [])
-  term' expr' tokens@(t : ts) =
-    if fst t `elem` [T.Minus, T.Plus]
-      then do
-        (right, rest') <- factor ts
-        let op = case fst t of
-              T.Minus -> A.Minus
-              T.Plus -> A.Plus
-        term' (Binary expr' op right) rest'
-      else Right (expr', tokens)
+  term' expr' tokens'@(t : ts) =
+    case fst t of
+      T.Minus -> recurse A.Minus
+      T.Plus -> recurse A.Plus
+      _ -> Right (expr', tokens')
+   where
+    recurse op = do
+      (right, rest') <- factor ts
+      term' (Binary expr' op right) rest'
 
 factor :: [Token] -> Either ParseError (Expr, [Token])
 factor tokens = do
@@ -71,48 +77,43 @@ factor tokens = do
  where
   factor' :: Expr -> [Token] -> Either ParseError (Expr, [Token])
   factor' expr' [] = Right (expr', [])
-  factor' expr' tokens@(t : ts) =
-    if fst t `elem` [T.Slash, T.Star]
-      then do
-        (right, rest') <- unary ts
-        let op = case fst t of
-              T.Slash -> A.Slash
-              T.Star -> A.Star
-        factor' (Binary expr' op right) rest'
-      else Right (expr', tokens)
+  factor' expr' tokens'@(t : ts) =
+    case fst t of
+      T.Slash -> recurse A.Slash
+      T.Star -> recurse A.Star
+      _ -> Right (expr', tokens')
+   where
+    recurse op = do
+      (right, rest') <- unary ts
+      factor' (Binary expr' op right) rest'
 
 -- Unary
 
 unary :: [Token] -> Either ParseError (Expr, [Token])
 unary [] = primary []
 unary tokens@(t : ts) =
-  if fst t `elem` [T.Bang, T.Minus]
-    then do
-      (right, rest') <- unary ts
-      let op = case fst t of
-            T.Bang -> A.Bang
-            T.Minus -> A.Minus'
-      Right (Unary op right, rest')
-    else primary tokens
+  case fst t of
+    T.Bang -> recurse A.Bang
+    T.Minus -> recurse A.Minus'
+    _ -> primary tokens
+ where
+  recurse op = do
+    (right, rest') <- unary ts
+    Right (Unary op right, rest')
 
 -- Primary
 
 primary :: [Token] -> Either ParseError (Expr, [Token])
 primary [] = Left $ ParseError "Unexpected" (T.Eof, 0)
-primary tokens@(t : ts) = case fst t of
+primary (t : ts) = case fst t of
   T.False' -> Right (Literal (Bool' False), ts)
   T.True' -> Right (Literal (Bool' True), ts)
   T.Nil -> Right (Literal A.Nil, ts)
   T.Number' n -> Right (Literal (A.Number' n), ts)
   T.String' s -> Right (Literal (A.String' s), ts)
   T.LeftParen -> do
-    let (expr, rest) = expression ts
+    (expr, rest) <- expression ts
     case rest of
       t' : ts' | fst t' == T.RightParen -> Right (Grouping expr, ts')
-      t -> Left (ParseError "Expected ')' after expr" (head t))
-  _ -> Left $ ParseError "Unexpected" t
-
--- Expr
-
-expression :: [Token] -> (Expr, [Token])
-expression ts = undefined
+      _ -> Left (ParseError "Expected ')' after expr" t)
+  _ -> Left $ ParseError "Expect expr" t

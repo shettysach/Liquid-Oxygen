@@ -1,3 +1,4 @@
+Lox interpreter.
 Learning Haskell and Crafting Interpreters.
 
 Resources

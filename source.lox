@@ -1,6 +1,1 @@
-fun main() {
-    var name = 42.0 / 10.0;
-    // Comment
-    print "Hello, world!";
-    print name;
-}
+(7 + 3 / 10) + 10 >= (11 + 7)
