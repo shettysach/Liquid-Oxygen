@@ -6,7 +6,7 @@ import Token as T
 data ParseError = ParseError
   { message :: String,
     token :: TokenType,
-    line :: Int
+    location :: (Int, Int)
   }
   deriving (Show)
 
@@ -97,7 +97,7 @@ unary tokens@(t : ts) =
 -- Primary
 
 primary :: [Token] -> Either ParseError (Expr, [Token])
-primary [] = Left $ ParseError "Unexpected" T.Eof 0
+primary [] = Left $ ParseError "Unexpected" T.Eof (0, 0)
 primary (t : ts) = case fst t of
   T.False' -> Right (Literal (Bool' False), ts)
   T.True' -> Right (Literal (Bool' True), ts)

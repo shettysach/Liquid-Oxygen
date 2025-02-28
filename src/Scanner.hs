@@ -4,69 +4,75 @@ import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Token
 
 data ScanError = ScanError
-  { message :: String
-  , line :: Int
-  , lexeme :: String
+  { message :: String,
+    lexeme :: String,
+    location :: (Int, Int)
   }
   deriving (Show)
 
 scan :: String -> Either ScanError [Token]
-scan source = scanTokens source 1
+scan source = scanTokens source (1, 1)
 
-scanTokens :: String -> Int -> Either ScanError [Token]
-scanTokens [] line = Right [(Eof, line)]
-scanTokens chars@(c : cs) line
+scanTokens :: String -> (Int, Int) -> Either ScanError [Token]
+scanTokens [] location = Right [(Eof, location)]
+scanTokens chars@(c : cs) location@(line, col)
   -- Keywords and identifiers
   | isAlpha c || c == '_' = do
       let validChars v = isAlphaNum v || v == '_'
       let (lexeme, cs') = span validChars chars
-      let token = (scanWord lexeme, line)
-      (token :) <$> scanTokens cs' line
+      let token = (scanWord lexeme, location)
+      let col' = col + length lexeme
+      (token :) <$> scanTokens cs' (line, col')
 
   -- Numbers
   | isDigit c = do
-      let (tokenType, cs') = scanNumber chars
-      let token = (tokenType, line)
-      (token :) <$> scanTokens cs' line
+      let (lexeme, cs') = scanNumber chars
+      let token = (Number' (read lexeme), location)
+      let col' = col + length lexeme
+      (token :) <$> scanTokens cs' (line, col')
 
   -- Strings
   | c == '"' = do
       let (lexeme, cs') = span (/= '"') cs
       case cs' of
-        _ : cs'' ->
-          let token = (String' lexeme, line)
-           in (token :) <$> scanTokens cs'' line
+        _ : cs'' -> do
+          let token = (String' lexeme, location)
+          let line' = line + length (filter (== '\n') lexeme)
+          let col' = col + length lexeme + 2
+          (token :) <$> scanTokens cs'' (line', col')
         _ ->
           Left $
-            ScanError "Unterminated string" line $
-              takeWhile (/= '\n') lexeme
+            ScanError
+              "Unterminated string"
+              (takeWhile (/= '\n') lexeme)
+              location
 
   -- Whitespaces
-  | c `elem` [' ', '\t', '\r'] = scanTokens cs line
+  | c `elem` [' ', '\t', '\r'] = scanTokens cs (line, col + 1)
   -- Newline
-  | c == '\n' = scanTokens cs (line + 1)
+  | c == '\n' = scanTokens cs (line + 1, 1)
   --
   -- Division and comments
   | c == '/' =
       case cs of
         '/' : cs' ->
           let cs'' = dropWhile (/= '\n') cs'
-           in scanTokens cs'' line
+           in scanTokens cs'' (line + 1, 1)
         _ ->
-          let token = (Slash, line)
-           in (token :) <$> scanTokens cs line
+          let token = (Slash, location)
+           in (token :) <$> scanTokens cs (line, col + 1)
   -- Single and double char tokens
   | otherwise =
       case chars of
         c' : c'' : cs'
           | Just tokenType <- scanDoubleChar c' c'' ->
-              let token = (tokenType, line)
-               in (token :) <$> scanTokens cs' line
+              let token = (tokenType, location)
+               in (token :) <$> scanTokens cs' (line, col + 2)
         _c : _cs
           | Just tokenType <- scanSingleChar c ->
-              let token = (tokenType, line)
-               in (token :) <$> scanTokens cs line
-        _ -> Left (ScanError "Unidentified token" line [c])
+              let token = (tokenType, location)
+               in (token :) <$> scanTokens cs (line, col + 1)
+        _ -> Left (ScanError "Unidentified token" [c] location)
 
 scanWord :: String -> TokenType
 scanWord lexeme = case lexeme of
@@ -88,15 +94,14 @@ scanWord lexeme = case lexeme of
   "while" -> While
   _ -> Identifier lexeme
 
-scanNumber :: String -> (TokenType, String)
-scanNumber chars =
+scanNumber :: String -> (String, String)
+scanNumber chars = do
   let (intPart, cs) = span isDigit chars
-      (numberStr, cs') = case cs of
-        ('.' : rest) ->
-          let (decPart, cs'') = span isDigit rest
-           in (intPart ++ "." ++ decPart, cs'')
-        _ -> (intPart, cs)
-   in (Number' (read numberStr), cs')
+  case cs of
+    ('.' : cs') ->
+      let (decPart, cs'') = span isDigit cs'
+       in (intPart ++ "." ++ decPart, cs'')
+    _ -> (intPart, cs)
 
 scanDoubleChar :: Char -> Char -> Maybe TokenType
 scanDoubleChar c0 c1 = case [c0, c1] of

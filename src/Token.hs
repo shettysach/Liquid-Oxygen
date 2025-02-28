@@ -1,6 +1,6 @@
 module Token where
 
-type Token = (TokenType, Int)
+type Token = (TokenType, (Int, Int))
 
 data TokenType
   = -- Single-character tokens.
