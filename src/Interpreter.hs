@@ -15,7 +15,8 @@ interpret (stmt : stmts) = do
     Print expr -> do
       case evaluate expr of
         Left err -> return (Left err)
-        Right ok -> print ok >> return (Right Nil)
+        Right ok ->
+          print ok >> return (Right Nil)
     Expr expr -> return (evaluate expr)
   case result of
     Left err -> return (Left err)
@@ -27,10 +28,7 @@ evaluate (Grouping expr) = evaluate expr
 evaluate (Unary Minus' right) = case evaluate right of
   Right (Number' n) -> Right (Number' (-n))
   Right literal ->
-    Left $
-      EvalError "Invalid operand" $
-        Unary Minus' $
-          Literal literal
+    Left $ EvalError "Invalid operand" $ Unary Minus' $ Literal literal
   Left err -> Left err
 evaluate (Unary Bang right) = Bool' . not . isTruthy <$> evaluate right
 evaluate (Binary op left right) = evalBinary op left right
@@ -39,29 +37,35 @@ evalBinary :: BinaryOp -> Expr -> Expr -> Either EvalError Literal
 evalBinary op left right = do
   left' <- evaluate left
   right' <- evaluate right
-  case (op, left', right') of
-    -- Arithmetic ops
-    (Minus, Number' l, Number' r) -> Right $ Number' $ l - r
-    (Slash, Number' l, Number' r) -> Right $ Number' $ l / r
-    (Star, Number' l, Number' r) -> Right $ Number' $ l * r
-    (Plus, Number' l, Number' r) -> Right $ Number' $ l + r
+  case (left', right') of
+    -- Number
+    (Number' l, Number' r) -> case op of
+      Minus        -> Right $ Number' (l - r)
+      Slash        -> Right $ Number' (l / r)
+      Star         -> Right $ Number' (l * r)
+      Plus         -> Right $ Number' (l + r)
+      Greater      -> Right $ Bool' (l > r)
+      GreaterEqual -> Right $ Bool' (l >= r)
+      Less         -> Right $ Bool' (l < r)
+      LessEqual    -> Right $ Bool' (l <= r)
+      _            -> invalidOp
     -- String
-    (Plus, String' l, String' r) -> Right $ String' $ l ++ r
-    -- Comparison ops
-    (Greater, Number' l, Number' r) -> Right $ Bool' $ l > r
-    (GreaterEqual, Number' l, Number' r) -> Right $ Bool' $ l >= r
-    (Less, Number' l, Number' r) -> Right $ Bool' $ l < r
-    (LessEqual, Number' l, Number' r) -> Right $ Bool' $ l <= r
-    (EqualEqual, l, r) -> Right $ Bool' $ l == r
-    (BangEqual, l, r) -> Right $ Bool' $ l /= r
-    -- Logical ops
-    (Or, Bool' l, Bool' r) -> Right $ Bool' $ l || r
-    (And, Bool' l, Bool' r) -> Right $ Bool' $ l && r
-    -- Error
-    _ ->
-      Left $
-        EvalError "Invalid operands" $
-          Binary op (Literal right') (Literal right')
+    (String' l, String' r) -> case op of
+      Plus -> Right $ String' (l ++ r)
+      _    -> invalidOp
+    -- Boolean
+    (Bool' l, Bool' r) -> case op of
+      Or  -> Right $ Bool' (l || r)
+      And -> Right $ Bool' (l && r)
+      _   -> invalidOp
+    -- Equality
+    _ -> case op of
+      EqualEqual -> Right $ Bool' (left' == right')
+      BangEqual  -> Right $ Bool' (left' /= right')
+      _          -> invalidOp
+ where
+  invalidOp =
+    Left $ EvalError "Invalid op" $ Binary op left right
 
 isTruthy :: Literal -> Bool
 isTruthy Nil       = False

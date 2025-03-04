@@ -13,7 +13,7 @@ data Expr
   deriving (Show)
 
 data Literal = Number' Double | String' String | Bool' Bool | Nil
-  deriving (Show, Eq)
+  deriving (Eq)
 
 data UnaryOp = Minus' | Bang
   deriving (Show)
@@ -32,3 +32,9 @@ data BinaryOp
   | EqualEqual
   | BangEqual
   deriving (Show)
+
+instance Show Literal where
+  show (Bool' b)   = show b
+  show (Number' n) = show n
+  show (String' s) = s
+  show Nil         = "nil"
