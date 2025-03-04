@@ -3,10 +3,23 @@ module Interpreter where
 import Ast
 
 data EvalError = EvalError
-  { message :: String,
-    expr :: Expr
+  { message :: String
+  , expr    :: Expr
   }
   deriving (Show)
+
+interpret :: [Stmt] -> IO (Either EvalError Literal)
+interpret [] = return $ Right Nil
+interpret (stmt : stmts) = do
+  result <- case stmt of
+    Print expr -> do
+      case evaluate expr of
+        Left err -> return (Left err)
+        Right ok -> print ok >> return (Right Nil)
+    Expr expr -> return (evaluate expr)
+  case result of
+    Left err -> return (Left err)
+    Right _  -> interpret stmts
 
 evaluate :: Expr -> Either EvalError Literal
 evaluate (Literal literal) = Right literal
@@ -51,6 +64,6 @@ evalBinary op left right = do
           Binary op (Literal right') (Literal right')
 
 isTruthy :: Literal -> Bool
-isTruthy Nil = False
+isTruthy Nil       = False
 isTruthy (Bool' b) = b
-isTruthy _ = True
+isTruthy _         = True

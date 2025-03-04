@@ -3,13 +3,6 @@ module Ast where
 data Stmt
   = Expr Expr
   | Print Expr
-  | Var String (Maybe Expr)
-  | Assign String Expr
-  | Block [Stmt]
-  | If Expr Stmt (Maybe Stmt)
-  | While Expr Stmt
-  | Function String [String] [Stmt]
-  | Return (Maybe Expr)
   deriving (Show)
 
 data Expr

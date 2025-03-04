@@ -4,9 +4,9 @@ import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Token
 
 data ScanError = ScanError
-  { message :: String,
-    lexeme :: String,
-    location :: (Int, Int)
+  { message  :: String
+  , lexeme   :: String
+  , location :: (Int, Int)
   }
   deriving (Show)
 
@@ -18,25 +18,23 @@ scanTokens [] location = Right [(Eof, location)]
 scanTokens chars@(c : cs) location@(line, col)
   -- Keywords and identifiers
   | isAlpha c || c == '_' = do
-      let (lexeme, cs') = span (\v -> isAlphaNum v || v == '_') chars
+      let (lexeme, cs') = span (\x -> isAlphaNum x || x == '_') chars
       let token = (scanWord lexeme, location)
-      let col' = col + length lexeme
-      (token :) <$> scanTokens cs' (line, col')
+      (token :) <$> scanTokens cs' (line, col + length lexeme)
 
   -- Numbers
   | isDigit c = do
       let (lexeme, cs') = scanNumber chars
-      let token = (Number' (read lexeme), location)
-      let col' = col + length lexeme
-      (token :) <$> scanTokens cs' (line, col')
+      let token = ((Number' . read) lexeme, location)
+      (token :) <$> scanTokens cs' (line, col + length lexeme)
 
   -- Strings
   | c == '"' = do
       let (lexeme, cs') = span (/= '"') cs
       case cs' of
-        _ : cs'' -> do
+        '"' : cs'' -> do
           let token = (String' lexeme, location)
-          let line' = line + length (filter (== '\n') lexeme)
+          let line' = line + (length . filter (== '\n')) lexeme
           let col' = col + length lexeme + 2
           (token :) <$> scanTokens cs'' (line', col')
         _ ->
@@ -50,7 +48,6 @@ scanTokens chars@(c : cs) location@(line, col)
   | c `elem` [' ', '\t', '\r'] = scanTokens cs (line, col + 1)
   -- Newline
   | c == '\n' = scanTokens cs (line + 1, 1)
-  --
   -- Division and comments
   | c == '/' =
       case cs of
@@ -75,23 +72,23 @@ scanTokens chars@(c : cs) location@(line, col)
 
 scanWord :: String -> TokenType
 scanWord lexeme = case lexeme of
-  "and" -> And
-  "class" -> Class
-  "else" -> Else
-  "false" -> False'
-  "fun" -> Fun
-  "for" -> For
-  "if" -> If
-  "nil" -> Nil
-  "or" -> Or
-  "print" -> Print
+  "and"    -> And
+  "class"  -> Class
+  "else"   -> Else
+  "false"  -> False'
+  "fun"    -> Fun
+  "for"    -> For
+  "if"     -> If
+  "nil"    -> Nil
+  "or"     -> Or
+  "print"  -> Print
   "return" -> Return
-  "super" -> Super
-  "this" -> This
-  "true" -> True'
-  "var" -> Var
-  "while" -> While
-  _ -> Identifier lexeme
+  "super"  -> Super
+  "this"   -> This
+  "true"   -> True'
+  "var"    -> Var
+  "while"  -> While
+  _        -> Identifier lexeme
 
 scanNumber :: String -> (String, String)
 scanNumber chars = do
@@ -108,7 +105,7 @@ scanDoubleChar c0 c1 = case [c0, c1] of
   "==" -> Just EqualEqual
   "<=" -> Just LessEqual
   ">=" -> Just GreaterEqual
-  _ -> Nothing
+  _    -> Nothing
 
 scanSingleChar :: Char -> Maybe TokenType
 scanSingleChar c = case c of
@@ -126,4 +123,4 @@ scanSingleChar c = case c of
   '=' -> Just Equal
   '>' -> Just Greater
   '<' -> Just Less
-  _ -> Nothing
+  _   -> Nothing
