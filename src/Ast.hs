@@ -3,6 +3,7 @@ module Ast where
 data Stmt
   = Expr Expr
   | Print Expr
+  | Var String Expr
   deriving (Show)
 
 data Expr
@@ -10,6 +11,8 @@ data Expr
   | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
   | Grouping Expr
+  | Variable String
+  | Assignment String Expr
   deriving (Show)
 
 data Literal = Number' Double | String' String | Bool' Bool | Nil

@@ -1,71 +1,86 @@
 module Interpreter where
 
 import Ast
+import Environment
 
-data EvalError = EvalError
-  { message :: String
-  , expr    :: Expr
-  }
+-- TODO: Get location context
+newtype RuntimeError = RuntimeError String
   deriving (Show)
 
-interpret :: [Stmt] -> IO (Either EvalError Literal)
-interpret [] = return $ Right Nil
-interpret (stmt : stmts) = do
-  result <- case stmt of
-    Print expr -> do
-      case evaluate expr of
-        Left err -> return (Left err)
-        Right ok ->
-          print ok >> return (Right Nil)
-    Expr expr -> return (evaluate expr)
-  case result of
-    Left err -> return (Left err)
-    Right _  -> interpret stmts
+interpret :: [Stmt] -> IO (Either RuntimeError Literal)
+interpret stmts = interpret' stmts newEnv
 
-evaluate :: Expr -> Either EvalError Literal
-evaluate (Literal literal) = Right literal
-evaluate (Grouping expr) = evaluate expr
-evaluate (Unary Minus' right) = case evaluate right of
-  Right (Number' n) -> Right (Number' (-n))
-  Right literal ->
-    Left $ EvalError "Invalid operand" $ Unary Minus' $ Literal literal
-  Left err -> Left err
-evaluate (Unary Bang right) = Bool' . not . isTruthy <$> evaluate right
-evaluate (Binary op left right) = evalBinary op left right
+interpret' :: [Stmt] -> Env -> IO (Either RuntimeError Literal)
+interpret' [] _ = return $ Right Nil
+interpret' (stmt : stmts) env = do
+  case stmt of
+    Expr expr -> case evaluate expr env of
+      Left err        -> return (Left err)
+      Right (_, env') -> interpret' stmts env'
+    Var name expr -> case evaluate expr env of
+      Left err          -> return (Left err)
+      Right (lit, env') -> interpret' stmts (defVar name lit env')
+    Print expr -> case evaluate expr env of
+      Left err          -> return (Left err)
+      Right (lit, env') -> print lit >> interpret' stmts env'
 
-evalBinary :: BinaryOp -> Expr -> Expr -> Either EvalError Literal
-evalBinary op left right = do
-  left' <- evaluate left
-  right' <- evaluate right
+--
+
+evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
+evaluate (Literal lit) env = Right (lit, env)
+evaluate (Grouping expr) env = evaluate expr env
+evaluate (Variable name) env =
+  case getVar name env of
+    Just value -> Right (value, env)
+    Nothing    -> Left $ RuntimeError $ "Undefined var: " ++ name
+evaluate (Assignment name expr) env =
+  case getVar name env of
+    Just _ -> do
+      (lit, env') <- evaluate expr env
+      Right (lit, defVar name lit env')
+    Nothing -> Left $ RuntimeError $ "Undefined var: " ++ name
+evaluate (Unary Minus' right) env =
+  case evaluate right env of
+    Right (Number' n, env') -> Right (Number' (-n), env')
+    Right _                 -> Left $ RuntimeError "Invalid operand"
+    Left err                -> Left err
+evaluate (Unary Bang right) env =
+  case evaluate right env of
+    Right (lit, env') -> Right (Bool' . not . isTruthy $ lit, env')
+    Left err          -> Left err
+evaluate (Binary op left right) env = case evalBinary op left right env of
+  Right lit -> Right (lit, env)
+  Left err  -> Left err
+
+evalBinary :: BinaryOp -> Expr -> Expr -> Env -> Either RuntimeError Literal
+evalBinary op left right env = do
+  (left', _) <- evaluate left env
+  (right', _) <- evaluate right env
   case (left', right') of
-    -- Number
     (Number' l, Number' r) -> case op of
-      Minus        -> Right $ Number' (l - r)
-      Slash        -> Right $ Number' (l / r)
-      Star         -> Right $ Number' (l * r)
-      Plus         -> Right $ Number' (l + r)
-      Greater      -> Right $ Bool' (l > r)
-      GreaterEqual -> Right $ Bool' (l >= r)
-      Less         -> Right $ Bool' (l < r)
-      LessEqual    -> Right $ Bool' (l <= r)
+      Minus        -> Right $ Number' $ l - r
+      Slash        -> Right $ Number' $ l / r
+      Star         -> Right $ Number' $ l * r
+      Plus         -> Right $ Number' $ l + r
+      Greater      -> Right $ Bool' $ l > r
+      GreaterEqual -> Right $ Bool' $ l >= r
+      Less         -> Right $ Bool' $ l < r
+      LessEqual    -> Right $ Bool' $ l <= r
       _            -> invalidOp
-    -- String
     (String' l, String' r) -> case op of
-      Plus -> Right $ String' (l ++ r)
+      Plus -> Right $ String' $ l ++ r
       _    -> invalidOp
-    -- Boolean
     (Bool' l, Bool' r) -> case op of
-      Or  -> Right $ Bool' (l || r)
-      And -> Right $ Bool' (l && r)
+      Or  -> Right $ Bool' $ l || r
+      And -> Right $ Bool' $ l && r
       _   -> invalidOp
-    -- Equality
-    _ -> case op of
-      EqualEqual -> Right $ Bool' (left' == right')
-      BangEqual  -> Right $ Bool' (left' /= right')
+    (_, _) -> case op of
+      EqualEqual -> Right $ Bool' $ left' == right'
+      BangEqual  -> Right $ Bool' $ left' /= right'
       _          -> invalidOp
  where
   invalidOp =
-    Left $ EvalError "Invalid op" $ Binary op left right
+    Left $ RuntimeError "Invalid operands"
 
 isTruthy :: Literal -> Bool
 isTruthy Nil       = False

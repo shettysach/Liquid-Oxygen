@@ -6,7 +6,7 @@ import Token
 data ScanError = ScanError
   { message  :: String
   , lexeme   :: String
-  , location :: (Int, Int)
+  , position :: (Int, Int)
   }
   deriving (Show)
 
@@ -14,18 +14,18 @@ scan :: String -> Either ScanError [Token]
 scan source = scanTokens source (1, 1)
 
 scanTokens :: String -> (Int, Int) -> Either ScanError [Token]
-scanTokens [] location = Right [(Eof, location)]
-scanTokens chars@(c : cs) location@(line, col)
+scanTokens [] pos = Right [(Eof, pos)]
+scanTokens chars@(c : cs) pos@(line, col)
   -- Keywords and identifiers
   | isAlpha c || c == '_' = do
       let (lexeme, cs') = span (\x -> isAlphaNum x || x == '_') chars
-      let token = (scanWord lexeme, location)
+      let token = (scanWord lexeme, pos)
       (token :) <$> scanTokens cs' (line, col + length lexeme)
 
   -- Numbers
   | isDigit c = do
       let (lexeme, cs') = scanNumber chars
-      let token = ((Number' . read) lexeme, location)
+      let token = ((Number' . read) lexeme, pos)
       (token :) <$> scanTokens cs' (line, col + length lexeme)
 
   -- Strings
@@ -33,7 +33,7 @@ scanTokens chars@(c : cs) location@(line, col)
       let (lexeme, cs') = span (/= '"') cs
       case cs' of
         '"' : cs'' -> do
-          let token = (String' lexeme, location)
+          let token = (String' lexeme, pos)
           let line' = line + (length . filter (== '\n')) lexeme
           let col' = col + length lexeme + 2
           (token :) <$> scanTokens cs'' (line', col')
@@ -42,7 +42,7 @@ scanTokens chars@(c : cs) location@(line, col)
             ScanError
               "Unterminated string"
               (takeWhile (/= '\n') lexeme)
-              location
+              pos
 
   -- Whitespaces
   | c `elem` [' ', '\t', '\r'] = scanTokens cs (line, col + 1)
@@ -55,20 +55,20 @@ scanTokens chars@(c : cs) location@(line, col)
           let cs'' = dropWhile (/= '\n') cs'
            in scanTokens cs'' (line + 1, 1)
         _ ->
-          let token = (Slash, location)
+          let token = (Slash, pos)
            in (token :) <$> scanTokens cs (line, col + 1)
   -- Single and double char tokens
   | otherwise =
       case chars of
         c' : c'' : cs'
           | Just tokenType <- scanDoubleChar c' c'' ->
-              let token = (tokenType, location)
+              let token = (tokenType, pos)
                in (token :) <$> scanTokens cs' (line, col + 2)
-        _c : _cs
+        _ : _
           | Just tokenType <- scanSingleChar c ->
-              let token = (tokenType, location)
+              let token = (tokenType, pos)
                in (token :) <$> scanTokens cs (line, col + 1)
-        _ -> Left (ScanError "Unidentified token" [c] location)
+        _ -> Left (ScanError "Unidentified token" [c] pos)
 
 scanWord :: String -> TokenType
 scanWord lexeme = case lexeme of
