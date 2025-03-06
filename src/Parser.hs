@@ -11,48 +11,45 @@ data ParseError = ParseError
   deriving (Show)
 
 parse :: [Token] -> Either ParseError [Stmt]
-parse tokens = parse' tokens []
+parse = parse' []
  where
-  parse' :: [Token] -> [Stmt] -> Either ParseError [Stmt]
-  parse' [(T.Eof, _)] stmts = Right (reverse stmts)
-  parse' tokens' stmts = do
-    (stmt, rest) <- statement tokens'
-    parse' rest (stmt : stmts)
+  parse' stmts [(T.Eof, _)] = Right (reverse stmts)
+  parse' stmts tokens = declaration tokens >>= uncurry (parse' . (: stmts))
 
-statement :: [Token] -> Either ParseError (Stmt, [Token])
-statement [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
-statement tokens@(t : ts) =
+declaration :: [Token] -> Either ParseError (Stmt, [Token])
+declaration [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
+declaration [t@(T.Eof, _)] = Left $ ParseError "Unexpected" t
+declaration tokens@(t : ts) =
   case fst t of
-    T.Var -> declaration ts
-    T.Print -> do
-      (expr, ts') <- expression ts
-      statement' ts' (A.Print expr)
-    _ -> do
-      (expr, ts') <- expression tokens
-      statement' ts' (A.Expr expr)
+    T.Var       -> varDeclaration ts
+    T.Print     -> expression ts >>= uncurry (statement . A.Print)
+    T.LeftBrace -> block [] ts >>= Right . first A.Block
+    _           -> expression tokens >>= uncurry (statement . A.Expr)
  where
-  statement' (t' : ts') stmt | fst t' == T.Semicolon = Right (stmt, ts')
-  statement' tokens' _ = Left $ ParseError "Expected ';'" (head tokens')
+  statement stmt (t' : ts') | fst t' == T.Semicolon = Right (stmt, ts')
+  statement _ tokens' = Left $ ParseError "Expected ';'" (head tokens')
 
-  declaration ((T.Identifier name, _) : rest) = case rest of
+  block stmts (t' : ts') | fst t' == T.RightBrace = Right (reverse stmts, ts')
+  block stmts tokens' = declaration tokens' >>= uncurry (block . (: stmts))
+
+  varDeclaration ((T.Identifier name, _) : rest) = case rest of
     t' : ts'
       | fst t' == T.Equal ->
-          expression ts' >>= \(expr, ts'') ->
-            statement' ts'' (A.Var name expr)
+          expression ts' >>= uncurry (statement . A.Var name)
     t' : _
       | fst t' == T.Semicolon ->
-          statement' rest $ A.Var name $ Literal A.Nil
+          statement (A.Var name $ Literal A.Nil) rest
     _ -> Left $ ParseError "Expected '=' after var name." (head rest)
-  declaration ts' = Left $ ParseError "Expected var name." (head ts')
+  varDeclaration ts' = Left $ ParseError "Expected var name." (head ts')
 
 ---
 
-type Parse = [Token] -> Either ParseError (Expr, [Token])
+type ParseExpr = [Token] -> Either ParseError (Expr, [Token])
 
-expression :: Parse
+expression :: ParseExpr
 expression = assignment
 
-assignment :: Parse
+assignment :: ParseExpr
 assignment tokens = do
   equality tokens >>= uncurry assignment'
  where
@@ -65,7 +62,7 @@ assignment tokens = do
 
 -- Binary
 
-equality :: Parse
+equality :: ParseExpr
 equality tokens = do
   comparison tokens >>= uncurry equality'
  where
@@ -79,7 +76,7 @@ equality tokens = do
     recurse op =
       comparison ts >>= uncurry (equality' . Binary op expr)
 
-comparison :: Parse
+comparison :: ParseExpr
 comparison tokens = do
   term tokens >>= uncurry comparison'
  where
@@ -95,7 +92,7 @@ comparison tokens = do
     recurse op =
       term ts >>= uncurry (comparison' . Binary op expr)
 
-term :: Parse
+term :: ParseExpr
 term tokens = do
   factor tokens >>= uncurry term'
  where
@@ -109,7 +106,7 @@ term tokens = do
     recurse op =
       factor ts >>= uncurry (term' . Binary op expr)
 
-factor :: Parse
+factor :: ParseExpr
 factor tokens = do
   unary tokens >>= uncurry factor'
  where
@@ -125,7 +122,7 @@ factor tokens = do
 
 -- Unary
 
-unary :: Parse
+unary :: ParseExpr
 unary [] = primary []
 unary tokens@(t : ts) =
   case fst t of
@@ -138,7 +135,7 @@ unary tokens@(t : ts) =
 
 -- Primary
 
-primary :: Parse
+primary :: ParseExpr
 primary [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
 primary (t : ts) = case fst t of
   T.False' -> Right (Literal $ Bool' False, ts)

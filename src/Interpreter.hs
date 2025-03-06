@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Interpreter where
 
 import Ast
@@ -8,12 +10,10 @@ newtype RuntimeError = RuntimeError String
   deriving (Show)
 
 interpret :: [Stmt] -> IO (Either RuntimeError Literal)
-interpret stmts = interpret' stmts newEnv
-
-interpret' :: [Stmt] -> Env -> IO (Either RuntimeError Literal)
-interpret' [] _ = return $ Right Nil
-interpret' (stmt : stmts) env = do
-  case stmt of
+interpret statements = interpret' statements global
+ where
+  interpret' [] _ = return $ Right Nil
+  interpret' (stmt : stmts) env = case stmt of
     Expr expr -> case evaluate expr env of
       Left err        -> return (Left err)
       Right (_, env') -> interpret' stmts env'
@@ -23,8 +23,10 @@ interpret' (stmt : stmts) env = do
     Print expr -> case evaluate expr env of
       Left err          -> return (Left err)
       Right (lit, env') -> print lit >> interpret' stmts env'
-
---
+    Block stmts' ->
+      interpret' stmts' (local env) >>= \case
+        Left err -> return (Left err)
+        Right _ -> interpret' stmts env
 
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)

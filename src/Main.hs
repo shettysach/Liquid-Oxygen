@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 import Interpreter (interpret)
 import Parser      (parse)
 import Scanner     (scan)
@@ -16,10 +18,9 @@ chainIO f (Just x) = case f x of
   Left err -> print err >> return Nothing
   Right ok -> return (Just ok)
 
-endIO :: (Show err) => (a -> IO (Either err res)) -> Maybe a -> IO ()
+endIO :: (Show err) => (a -> IO (Either err ok)) -> Maybe a -> IO ()
 endIO _ Nothing = return ()
-endIO f (Just x) = do
-  result <- f x
-  case result of
+endIO f (Just x) =
+  f x >>= \case
     Left err -> print err
-    Right _  -> return ()
+    Right _ -> return ()

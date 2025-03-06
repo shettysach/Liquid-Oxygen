@@ -1,15 +1,19 @@
 module Environment where
 
 import Ast
-import Data.Map as Map
+import Control.Applicative ((<|>))
+import Data.Map            as Map
 
-type Env = Map String Literal
+data Env = Env (Map String Literal) (Maybe Env)
 
-newEnv :: Env
-newEnv = Map.empty
+global :: Env
+global = Env Map.empty Nothing
+
+local :: Env -> Env
+local env = Env Map.empty (Just env)
 
 defVar :: String -> Literal -> Env -> Env
-defVar = Map.insert
+defVar name value (Env scope prev) = Env (Map.insert name value scope) prev
 
 getVar :: String -> Env -> Maybe Literal
-getVar = Map.lookup
+getVar name (Env scope prev) = Map.lookup name scope <|> (prev >>= getVar name)
