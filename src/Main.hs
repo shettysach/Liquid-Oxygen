@@ -5,7 +5,7 @@ import Parser      (parse)
 import Scanner     (scan)
 
 main :: IO ()
-main =
+main = do
   readFile "source.lox"
     >>= \source ->
       chainIO scan (Just source)

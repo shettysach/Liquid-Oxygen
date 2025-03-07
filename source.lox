@@ -1,9 +1,4 @@
-var b = 0;
-print b;
-
-{
-    b = 1;
-    print b;
-}
-
-print b;
+if (10 == 10)
+    print "Hello";
+else
+    print "World";
