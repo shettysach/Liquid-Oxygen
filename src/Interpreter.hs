@@ -1,6 +1,7 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Interpreter where
+
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Except
 
 import AST
 import Environment
@@ -10,42 +11,34 @@ newtype RuntimeError = RuntimeError String
   deriving (Show)
 
 interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
-interpret statements = interpret' statements global
+interpret statements = runExceptT (interpret' statements global)
  where
-  interpret' [] env = return $ Right (Nil, env)
+  interpret' [] env = return (Nil, env)
   interpret' (stmt : stmts) env = case stmt of
-    Expr expr -> case evaluate expr env of
-      Left err        -> return (Left err)
-      Right (_, env') -> interpret' stmts env'
-    Var name expr -> case evaluate expr env of
-      Left err          -> return (Left err)
-      Right (lit, env') -> interpret' stmts (define name lit env')
-    Print expr -> case evaluate expr env of
-      Left err          -> return (Left err)
-      Right (lit, env') -> print lit >> interpret' stmts env'
-    If condition thenStmt elseStmt -> case evaluate condition env of
-      Left err -> return (Left err)
-      Right (cond, env') ->
-        if isTruthy cond
-          then interpret' (thenStmt : stmts) env'
-          else case elseStmt of
-            Just elseStmt' -> interpret' (elseStmt' : stmts) env'
-            Nothing        -> interpret' stmts env'
+    Expr expr ->
+      (ExceptT . return) (evaluate expr env) >>= interpret' stmts . snd
+    Var name expr ->
+      (ExceptT . return) (evaluate expr env)
+        >>= interpret' stmts . uncurry (define name)
+    Print expr -> do
+      (lit, env') <- (ExceptT . return) (evaluate expr env)
+      (liftIO . print) lit
+      interpret' stmts env'
+    If condition thenStmt elseStmt -> do
+      (cond, env') <- (ExceptT . return) (evaluate condition env)
+      if isTruthy cond
+        then interpret' (thenStmt : stmts) env'
+        else case elseStmt of
+          Just stmt' -> interpret' (stmt' : stmts) env'
+          Nothing    -> interpret' stmts env'
     While condition stmt' -> loop env
      where
-      loop env1 = case evaluate condition env1 of
-        Left err -> return (Left err)
-        Right (cond, env2) ->
-          if isTruthy cond
-            then
-              interpret' [stmt'] env2 >>= \case
-                Left err -> return (Left err)
-                Right (_, env3) -> loop env3
-            else interpret' stmts env2
-    Block stmts' ->
-      interpret' stmts' (local env) >>= \case
-        Left err -> return (Left err)
-        Right (_, env') -> interpret' stmts env'
+      loop env1 = do
+        (cond, env2) <- (ExceptT . return) (evaluate condition env1)
+        if isTruthy cond
+          then interpret' [stmt'] env2 >>= loop . snd
+          else interpret' stmts env2
+    Block stmts' -> interpret' stmts' (local env) >>= interpret' stmts . snd
 
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)

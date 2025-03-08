@@ -13,7 +13,7 @@ main = do
         >>= endIO interpret
 
 chainIO ::
-  (Show err, Show ok) => (a -> Either err ok) -> Maybe a -> IO (Maybe ok)
+  (Show err) => (a -> Either err ok) -> Maybe a -> IO (Maybe ok)
 chainIO _ Nothing = return Nothing
 chainIO f (Just x) = case f x of
   Left err -> print err >> return Nothing

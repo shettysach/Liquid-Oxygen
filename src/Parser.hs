@@ -59,8 +59,8 @@ ifStatement (token : after) | fst token == T.LeftParen = do
     t : ts | fst t == T.RightParen -> do
       (thenBranch, afterThen) <- statement ts
       (elseBranch, afterElse) <- case afterThen of
-        (T.Else, _) : ts -> statement ts <&> first Just
-        _                -> Right (Nothing, afterThen)
+        t' : ts' | fst t' == T.Else -> statement ts' <&> first Just
+        _                           -> Right (Nothing, afterThen)
       Right (A.If condition thenBranch elseBranch, afterElse)
     _ -> Left $ ParseError "Expected ')' after if condition." (head afterCondn)
 ifStatement tokens = Left $ ParseError "Expected '(' after 'if'." (head tokens)
