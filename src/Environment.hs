@@ -1,7 +1,8 @@
 module Environment where
 
-import AST                 (Literal)
 import Control.Applicative ((<|>))
+
+import AST                 (Literal)
 import Data.Map            as Map
 
 data Env = Env (Map String Literal) (Maybe Env)

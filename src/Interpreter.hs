@@ -9,10 +9,10 @@ import Environment
 newtype RuntimeError = RuntimeError String
   deriving (Show)
 
-interpret :: [Stmt] -> IO (Either RuntimeError Literal)
+interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
 interpret statements = interpret' statements global
  where
-  interpret' [] _ = return $ Right Nil
+  interpret' [] env = return $ Right (Nil, env)
   interpret' (stmt : stmts) env = case stmt of
     Expr expr -> case evaluate expr env of
       Left err        -> return (Left err)
@@ -25,35 +25,40 @@ interpret statements = interpret' statements global
       Right (lit, env') -> print lit >> interpret' stmts env'
     If condition thenStmt elseStmt -> case evaluate condition env of
       Left err -> return (Left err)
-      Right (condValue, env') ->
-        if isTruthy condValue
-          then interpret' [thenStmt] env'
-          else maybe (interpret' stmts env') (\s -> interpret' [s] env') elseStmt
+      Right (cond, env') ->
+        if isTruthy cond
+          then interpret' (thenStmt : stmts) env'
+          else case elseStmt of
+            Just elseStmt' -> interpret' (elseStmt' : stmts) env'
+            Nothing        -> interpret' stmts env'
+    While condition stmt' -> loop env
+     where
+      loop env1 = case evaluate condition env1 of
+        Left err -> return (Left err)
+        Right (cond, env2) ->
+          if isTruthy cond
+            then
+              interpret' [stmt'] env2 >>= \case
+                Left err -> return (Left err)
+                Right (_, env3) -> loop env3
+            else interpret' stmts env2
     Block stmts' ->
       interpret' stmts' (local env) >>= \case
         Left err -> return (Left err)
-        Right _ -> interpret' stmts env
+        Right (_, env') -> interpret' stmts env'
 
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)
 evaluate (Grouping expr) env = evaluate expr env
-evaluate (Variable name) env =
-  case get name env of
-    Just value -> Right (value, env)
-    Nothing    -> Left $ RuntimeError $ "Undefined var: " ++ name
-evaluate (Assignment name expr) env =
-  case get name env of
-    Just _ -> do
-      (lit, env') <- evaluate expr env
-      Right (lit, define name lit env')
-    Nothing -> Left $ RuntimeError $ "Undefined var: " ++ name
+evaluate (Variable name) env = case get name env of
+  Just value -> Right (value, env)
+  Nothing    -> Left $ RuntimeError $ "Undefined var: " ++ name
+evaluate (Assignment name expr) env = case get name env of
+  Just _ -> evaluate expr env >>= \(lit, env') -> Right (lit, define name lit env')
+  Nothing -> Left $ RuntimeError $ "Undefined var: " ++ name
 evaluate (Logical op left right) env = evalLogical op left right env
-evaluate (Unary op right) env = evalUnary op right env
-evaluate (Binary op left right) env = case evalBinary op left right env of
-  Right lit -> Right (lit, env)
-  Left err  -> Left err
-
---
+evaluate (Unary op right) env = (,env) <$> evalUnary op right env
+evaluate (Binary op left right) env = (,env) <$> evalBinary op left right env
 
 evalLogical ::
   LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
@@ -64,14 +69,14 @@ evalLogical op left right env = do
     And | (not . isTruthy) left' -> Right (left', env')
     _                            -> evaluate right env
 
-evalUnary :: UnaryOp -> Expr -> Env -> Either RuntimeError (Literal, Env)
+evalUnary :: UnaryOp -> Expr -> Env -> Either RuntimeError Literal
 evalUnary Minus' right env = case evaluate right env of
-  Right (Number' n, env') -> Right (Number' (-n), env')
-  Right _                 -> Left $ RuntimeError "Invalid operand"
-  Left err                -> Left err
+  Right (Number' n, _) -> Right $ Number' (-n)
+  Right _              -> Left $ RuntimeError "Invalid operand"
+  Left err             -> Left err
 evalUnary Bang right env = case evaluate right env of
-  Right (lit, env') -> Right (Bool' . not . isTruthy $ lit, env')
-  Left err          -> Left err
+  Right (lit, _) -> Right $ Bool' . not . isTruthy $ lit
+  Left err       -> Left err
 
 evalBinary :: BinaryOp -> Expr -> Expr -> Env -> Either RuntimeError Literal
 evalBinary op left right env
