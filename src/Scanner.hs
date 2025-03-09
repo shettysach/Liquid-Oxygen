@@ -3,13 +3,6 @@ module Scanner where
 import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Token
 
-data ScanError = ScanError
-  { message  :: String
-  , lexeme   :: String
-  , position :: (Int, Int)
-  }
-  deriving (Show)
-
 scan :: String -> Either ScanError [Token]
 scan source = scanTokens source (1, 1)
 
@@ -114,3 +107,22 @@ scanSingleChar c = case c of
   '>' -> Just Greater
   '<' -> Just Less
   _   -> Nothing
+
+-- Error
+
+data ScanError = ScanError
+  { message  :: String
+  , lexeme   :: String
+  , position :: (Int, Int)
+  }
+
+instance Show ScanError where
+  show (ScanError message lexeme position) =
+    "\n\ESC[31m"
+      ++ "Scan Error - "
+      ++ "\ESC[0m"
+      ++ message
+      ++ "\nLexeme - "
+      ++ lexeme
+      ++ "\nPosition - "
+      ++ show position

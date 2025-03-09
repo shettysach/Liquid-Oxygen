@@ -6,12 +6,6 @@ import Data.Functor  ((<&>))
 import AST           as A
 import Token         as T
 
-data ParseError = ParseError
-  { message :: String
-  , token   :: Token
-  }
-  deriving (Show)
-
 parse :: [Token] -> Either ParseError [Stmt]
 parse = parse' []
  where
@@ -21,9 +15,8 @@ parse = parse' []
 type Parse a = [Token] -> Either ParseError (a, [Token])
 
 statement :: Parse Stmt
-statement [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
-statement [t@(T.Eof, _)] = Left $ ParseError "Unexpected" t
-statement tokens@(t : ts) =
+statement [] = undefined
+statement (t : ts) =
   case fst t of
     T.Var       -> declaration ts
     T.Print     -> expression ts >>= uncurry (statement' . A.Print)
@@ -31,7 +24,7 @@ statement tokens@(t : ts) =
     T.If        -> ifStatement ts
     T.While     -> while ts
     T.For       -> for ts
-    _           -> expression tokens >>= uncurry (statement' . A.Expr)
+    _           -> expression (t : ts) >>= uncurry (statement' . A.Expr)
 
 statement' :: Stmt -> Parse Stmt
 statement' stmt (t : ts) | fst t == T.Semicolon = Right (stmt, ts)
@@ -124,8 +117,8 @@ assignment tokens = do
   assignment' expr (t@(T.Equal, _) : ts) = do
     (value, ts') <- assignment ts
     case expr of
-      Variable name -> Right (A.Assignment name value, ts')
-      _             -> Left $ ParseError "Invalid target." t
+      Variable var -> Right (A.Assignment var value, ts')
+      _            -> Left $ ParseError "Invalid target." t
   assignment' expr ts = Right (expr, ts)
 
 -- Logical
@@ -137,7 +130,7 @@ or tokens = do
   or' expr [] = Right (expr, [])
   or' expr tokens'@(t : ts) =
     case fst t of
-      T.Or -> recurse A.Or
+      T.Or -> recurse (A.Or, snd t)
       _    -> Right (expr, tokens')
    where
     recurse op =
@@ -154,7 +147,7 @@ and tokens = do
       _     -> Right (expr, tokens')
    where
     recurse op =
-      comparison ts >>= uncurry (and' . Logical op expr)
+      comparison ts >>= uncurry (and' . Logical (op, snd t) expr)
 
 -- Binary
 
@@ -170,7 +163,7 @@ equality tokens = do
       _            -> Right (expr, tokens')
    where
     recurse op =
-      comparison ts >>= uncurry (equality' . Binary op expr)
+      comparison ts >>= uncurry (equality' . Binary (op, snd t) expr)
 
 comparison :: Parse Expr
 comparison tokens = do
@@ -186,7 +179,7 @@ comparison tokens = do
       _              -> Right (expr, tokens')
    where
     recurse op =
-      term ts >>= uncurry (comparison' . Binary op expr)
+      term ts >>= uncurry (comparison' . Binary (op, snd t) expr)
 
 term :: Parse Expr
 term tokens = do
@@ -200,7 +193,7 @@ term tokens = do
       _       -> Right (expr, tokens')
    where
     recurse op =
-      factor ts >>= uncurry (term' . Binary op expr)
+      factor ts >>= uncurry (term' . Binary (op, snd t) expr)
 
 factor :: Parse Expr
 factor tokens = do
@@ -214,7 +207,7 @@ factor tokens = do
       _       -> Right (expr, tokens')
    where
     recurse op =
-      unary ts >>= uncurry (factor' . Binary op expr)
+      unary ts >>= uncurry (factor' . Binary (op, snd t) expr)
 
 -- Unary
 
@@ -222,24 +215,42 @@ unary :: Parse Expr
 unary [] = primary []
 unary tokens@(t : ts) =
   case fst t of
-    T.Bang  -> unary ts <&> (first . Unary) A.Bang
-    T.Minus -> unary ts <&> (first . Unary) A.Minus'
+    T.Bang  -> unary ts <&> (first . Unary) (A.Bang, snd t)
+    T.Minus -> unary ts <&> (first . Unary) (A.Minus', snd t)
     _       -> primary tokens
 
 -- Primary
 
 primary :: Parse Expr
-primary [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
+primary [] = undefined
 primary (t : ts) = case fst t of
   T.False' -> Right (Literal $ Bool' False, ts)
   T.True' -> Right (Literal $ Bool' True, ts)
   T.Nil -> Right (Literal A.Nil, ts)
   T.Number' n -> Right (Literal $ A.Number' n, ts)
   T.String' s -> Right (Literal $ A.String' s, ts)
-  T.Identifier i -> Right (Variable i, ts)
+  T.Identifier i -> Right (Variable (i, snd t), ts)
   T.LeftParen -> do
     (expr, ts') <- expression ts
     case ts' of
       (T.RightParen, _) : ts'' -> Right (Grouping expr, ts'')
       _                        -> Left $ ParseError "Expected ')' after expr" t
   _ -> Left $ ParseError "Expected expr" t
+
+-- Error
+
+data ParseError = ParseError
+  { message :: String
+  , token   :: Token
+  }
+
+instance Show ParseError where
+  show (ParseError message (token_type, position)) =
+    "\n\ESC[31m"
+      ++ "Parse Error - "
+      ++ "\ESC[0m"
+      ++ message
+      ++ "\nTokenType - "
+      ++ show token_type
+      ++ "\nPosition - "
+      ++ show position

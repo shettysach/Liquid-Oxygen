@@ -7,10 +7,6 @@ import Control.Monad.Trans.Except
 import AST
 import Environment
 
--- TODO: Get location context
-newtype RuntimeError = RuntimeError String
-  deriving (Show)
-
 interpret :: [Stmt] -> IO (Either RuntimeError ())
 interpret statements = void <$> runExceptT (interpret' statements global)
  where
@@ -41,22 +37,17 @@ interpret statements = void <$> runExceptT (interpret' statements global)
           else interpret' stmts env2
     Block stmts' -> interpret' stmts' (local env) >>= interpret' stmts . snd
 
-isTruthy :: Literal -> Bool
-isTruthy (Bool' b) = b
-isTruthy Nil       = False
-isTruthy _         = True
-
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)
 evaluate (Grouping expr) env = evaluate expr env
-evaluate (Variable name) env = case get name env of
+evaluate (Variable var) env = case get (fst var) env of
   Just value -> Right (value, env)
-  Nothing    -> Left $ RuntimeError $ "Undefined var: " ++ name
-evaluate (Assignment name expr) env = case get name env of
+  Nothing    -> Left $ uncurry (RuntimeError "Undefined var") var
+evaluate (Assignment var expr) env = case get (fst var) env of
   Just _ -> do
     (lit, env') <- evaluate expr env
-    Right (lit, define name lit env')
-  Nothing -> Left $ RuntimeError $ "Undefined var: " ++ name
+    Right (lit, define (fst var) lit env')
+  Nothing -> Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Logical op left right) env = evalLogical op left right env
 evaluate (Unary op right) env = (,env) <$> evalUnary op right env
 evaluate (Binary op left right) env = (,env) <$> evalBinary op left right env
@@ -65,26 +56,26 @@ evalLogical ::
   LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
 evalLogical op left right env = do
   (left', env') <- evaluate left env
-  case op of
+  case fst op of
     Or | isTruthy left'          -> Right (left', env')
     And | (not . isTruthy) left' -> Right (left', env')
     _                            -> evaluate right env
 
 evalUnary :: UnaryOp -> Expr -> Env -> Either RuntimeError Literal
-evalUnary Minus' right env = case evaluate right env of
-  Right (Number' n, _) -> Right $ Number' (-n)
-  Right _              -> Left $ RuntimeError "Invalid operand"
-  Left err             -> Left err
-evalUnary Bang right env =
-  evaluate right env >>= Right . Bool' . not . isTruthy . fst
+evalUnary op right env
+  | fst op == Minus' = case evaluate right env of
+      Right (Number' n, _) -> Right $ Number' (-n)
+      Right _              -> Left $ RuntimeError "Invalid operand" (show Minus') (snd op)
+      Left err             -> Left err
+  | otherwise = evaluate right env >>= Right . Bool' . not . isTruthy . fst
 
 evalBinary :: BinaryOp -> Expr -> Expr -> Env -> Either RuntimeError Literal
 evalBinary op left right env
-  | op == EqualEqual = do
+  | fst op == EqualEqual = do
       (left', _) <- evaluate left env
       (right', _) <- evaluate right env
       Right $ Bool' (left' == right')
-  | op == BangEqual = do
+  | fst op == BangEqual = do
       (left', _) <- evaluate left env
       (right', _) <- evaluate right env
       Right $ Bool' (left' /= right')
@@ -92,7 +83,7 @@ evalBinary op left right env
       (left', _) <- evaluate left env
       (right', _) <- evaluate right env
       case (left', right') of
-        (Number' l, Number' r) -> case op of
+        (Number' l, Number' r) -> case fst op of
           Minus        -> Right $ Number' $ l - r
           Slash        -> Right $ Number' $ l / r
           Star         -> Right $ Number' $ l * r
@@ -102,12 +93,35 @@ evalBinary op left right env
           Less         -> Right $ Bool' $ l < r
           LessEqual    -> Right $ Bool' $ l <= r
           _            -> invalidOp
-        (String' l, String' r) -> case op of
+        (String' l, String' r) -> case fst op of
           Plus -> Right $ String' $ l ++ r
           _    -> invalidOp
         _ -> invalidOp
  where
   invalidOp =
     Left $
-      RuntimeError $
-        "Invalid operands" ++ show op
+      RuntimeError "Invalid operands" (show . fst $ op) (snd op)
+
+isTruthy :: Literal -> Bool
+isTruthy (Bool' b) = b
+isTruthy Nil       = False
+isTruthy _         = True
+
+-- Error
+
+data RuntimeError = RuntimeError
+  { message  :: String
+  , node     :: String
+  , position :: (Int, Int)
+  }
+
+instance Show RuntimeError where
+  show (RuntimeError message node position) =
+    "\n\ESC[31m"
+      ++ "Runtime Error - "
+      ++ "\ESC[0m"
+      ++ message
+      ++ "\nNode - "
+      ++ node
+      ++ "\nPosition - "
+      ++ show position

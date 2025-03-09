@@ -7,25 +7,28 @@ data Stmt
   | Print Expr
   | Var String Expr
   | Block [Stmt]
-  deriving (Show)
 
 data Expr
   = Literal Literal
+  | Variable Variable
+  | Assignment Variable Expr
   | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
   | Logical LogicalOp Expr Expr
   | Grouping Expr
-  | Variable String
-  | Assignment String Expr
-  deriving (Show)
 
 data Literal = Number' Double | String' String | Bool' Bool | Nil
   deriving (Eq)
 
-data UnaryOp = Minus' | Bang
-  deriving (Show)
+type Variable = (String, (Int, Int))
+type UnaryOp = (UnaryOp', (Int, Int))
+type LogicalOp = (LogicalOp', (Int, Int))
+type BinaryOp = (BinaryOp', (Int, Int))
 
-data BinaryOp
+data UnaryOp' = Minus' | Bang
+  deriving (Show, Eq)
+
+data BinaryOp'
   = Slash
   | Star
   | Plus
@@ -38,8 +41,9 @@ data BinaryOp
   | BangEqual
   deriving (Show, Eq)
 
-data LogicalOp = And | Or
-  deriving (Show)
+data LogicalOp' = And | Or
+
+-- Show
 
 instance Show Literal where
   show (Bool' b)   = show b
