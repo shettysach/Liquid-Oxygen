@@ -16,19 +16,14 @@ scan source = scanTokens source (1, 1)
 scanTokens :: String -> (Int, Int) -> Either ScanError [Token]
 scanTokens [] pos = Right [(Eof, pos)]
 scanTokens chars@(c : cs) pos@(line, col)
-  -- Keywords and identifiers
   | isAlpha c || c == '_' = do
       let (lexeme, cs') = span (\x -> isAlphaNum x || x == '_') chars
       let token = (scanWord lexeme, pos)
       (token :) <$> scanTokens cs' (line, col + length lexeme)
-
-  -- Numbers
   | isDigit c = do
       let (lexeme, cs') = scanNumber chars
       let token = ((Number' . read) lexeme, pos)
       (token :) <$> scanTokens cs' (line, col + length lexeme)
-
-  -- Strings
   | c == '"' = do
       let (lexeme, cs') = span (/= '"') cs
       case cs' of
@@ -43,12 +38,8 @@ scanTokens chars@(c : cs) pos@(line, col)
               "Unterminated string"
               (takeWhile (/= '\n') lexeme)
               pos
-
-  -- Whitespaces
   | c `elem` [' ', '\t', '\r'] = scanTokens cs (line, col + 1)
-  -- Newline
   | c == '\n' = scanTokens cs (line + 1, 1)
-  -- Division and comments
   | c == '/' =
       case cs of
         '/' : cs' ->
@@ -57,7 +48,6 @@ scanTokens chars@(c : cs) pos@(line, col)
         _ ->
           let token = (Slash, pos)
            in (token :) <$> scanTokens cs (line, col + 1)
-  -- Single and double char tokens
   | otherwise =
       case chars of
         c' : c'' : cs'

@@ -12,13 +12,13 @@ data ParseError = ParseError
   }
   deriving (Show)
 
-type Parse a = [Token] -> Either ParseError (a, [Token])
-
 parse :: [Token] -> Either ParseError [Stmt]
 parse = parse' []
  where
   parse' stmts [(T.Eof, _)] = Right (reverse stmts)
   parse' stmts tokens       = statement tokens >>= uncurry (parse' . (: stmts))
+
+type Parse a = [Token] -> Either ParseError (a, [Token])
 
 statement :: Parse Stmt
 statement [] = Left $ ParseError "Unexpected" (T.Eof, (0, 0))
@@ -53,8 +53,8 @@ declaration ((T.Identifier name, _) : rest) = case rest of
 declaration ts = Left $ ParseError "Expected var name." (head ts)
 
 ifStatement :: Parse Stmt
-ifStatement (token : after) | fst token == T.LeftParen = do
-  (condition, afterCondn) <- expression after
+ifStatement (token : tokens) | fst token == T.LeftParen = do
+  (condition, afterCondn) <- expression tokens
   case afterCondn of
     t : ts | fst t == T.RightParen -> do
       (thenBranch, afterThen) <- statement ts
@@ -66,21 +66,21 @@ ifStatement (token : after) | fst token == T.LeftParen = do
 ifStatement tokens = Left $ ParseError "Expected '(' after 'if'." (head tokens)
 
 while :: Parse Stmt
-while (token : after) | fst token == T.LeftParen = do
-  (condition, afterCondn) <- expression after
+while (token : tokens) | fst token == T.LeftParen = do
+  (condition, afterCondn) <- expression tokens
   case afterCondn of
     t : ts | fst t == T.RightParen -> statement ts <&> first (A.While condition)
-    _ -> Left $ ParseError "Expected ')' after while condition." (head after)
+    _ -> Left $ ParseError "Expected ')' after while condition." (head tokens)
 while tokens = Left $ ParseError "Expected '(' after 'while'." (head tokens)
 
 for :: Parse Stmt
-for ((T.LeftParen, _) : after) = do
-  (initializer, afterInit) <- case after of
+for (token : tokens) | fst token == T.LeftParen = do
+  (initializer, afterInit) <- case tokens of
     t : ts
       | fst t == T.Semicolon -> return (Nothing, ts)
       | fst t == T.Var -> declaration ts <&> first Just
     _ -> do
-      (expr, rest) <- expression after
+      (expr, rest) <- expression tokens
       case rest of
         (T.Semicolon, _) : ts' -> return (Just (Expr expr), ts')
         _ -> Left $ ParseError "Expected ';' after loop initializer" (head rest)
@@ -98,10 +98,10 @@ for ((T.LeftParen, _) : after) = do
     _ -> do
       (incExpr, afterInc) <- expression afterCondn
       case afterInc of
-        (T.RightParen, _) : ts' -> return (Just incExpr, ts')
+        t' : ts' | fst t' == T.RightParen -> return (Just incExpr, ts')
         _ -> Left $ ParseError "Expected ')' after increment" (head afterInc)
-  (stmt, afterStmt) <- statement afterInc
 
+  (stmt, afterStmt) <- statement afterInc
   let body = case increment of
         Nothing  -> stmt
         Just inc -> Block [stmt, Expr inc]
