@@ -1,19 +1,31 @@
 Lox interpreter.
 Learning Haskell and Crafting Interpreters.
 
-**Build**
+- Work in progress
+- Scoping errors
+
+### Cabal
+```sh
+cabal run liquid-oxygen <script>
+```
+
+### GHC only
+
+#### Build
 
 - bash / zsh
-  ```bash
-  ghc -o lox src/Main.hs $(ls src/ | grep -v "Main.hs" | sed 's|^|src/|') -O3 -outputdir /tmp
+  ```sh
+  ghc -o lox src/Main.hs $(ls src/ | grep -v "Main.hs" | sed 's|^|src/|') -outputdir /tmp -O3
   ```
 
 - nushell
   ```nushell
-  ghc -o lox src/Main.hs ...(ls src/ | get name | filter {|x| $x != "src/Main.hs"}) -O3 -outputdir /tmp
+  ghc -o lox src/Main.hs ...(ls src/ | get name | filter {|x| $x != "src/Main.hs"}) -outputdir /tmp -O3
   ```
 
-**Run**
+Be sure to clean `/tmp` later.
+
+#### Run
 ```sh
 ./lox <script>
 ```

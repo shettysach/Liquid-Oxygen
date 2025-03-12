@@ -1,3 +1,4 @@
+import Control.Monad      (void)
 import Interpreter        (interpret)
 import Parser             (parse)
 import Scanner            (scan)
@@ -13,5 +14,6 @@ main = do
         Left err -> print err
         Right tokens -> case parse tokens of
           Left err         -> print err
-          Right statements -> interpret statements >>= either print return
+          Right statements -> interpret statements >>= either print (void <$> return)
+    -- Right statements -> interpret statements >>= either print (void <$> return)
     _ -> putStrLn "Usage: lox <script>"

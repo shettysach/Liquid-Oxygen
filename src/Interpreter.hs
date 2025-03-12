@@ -1,16 +1,14 @@
 module Interpreter where
 
-import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
-import Control.Monad.Trans.Except
+import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
 
 import AST
 import Environment
 
-interpret :: [Stmt] -> IO (Either RuntimeError ())
-interpret statements = void <$> runExceptT (interpret' statements global)
+interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
+interpret statements = runExceptT (interpret' statements global)
  where
-  interpret' :: [Stmt] -> Env -> ExceptT RuntimeError IO (Literal, Env)
   interpret' [] env = return (Nil, env)
   interpret' (stmt : stmts) env = case stmt of
     Expr expr ->
@@ -21,21 +19,23 @@ interpret statements = void <$> runExceptT (interpret' statements global)
       (lit, env') <- (ExceptT . return) (evaluate expr env)
       (liftIO . print) lit
       interpret' stmts env'
-    If condition thenStmt elseStmt -> do
-      (cond, env') <- (ExceptT . return) (evaluate condition env)
-      if isTruthy cond
-        then interpret' (thenStmt : stmts) env'
-        else case elseStmt of
-          Just stmt' -> interpret' (stmt' : stmts) env'
-          Nothing    -> interpret' stmts env'
-    While condition stmt' -> loop env
+    If cond thenStmt elseStmt ->
+      (ExceptT . return) (evaluate cond env) >>= \(cond', env') ->
+        if isTruthy cond'
+          then interpret' (thenStmt : stmts) env'
+          else case elseStmt of
+            Just stmt' -> interpret' (stmt' : stmts) env'
+            Nothing    -> interpret' stmts env'
+    While cond stmt' -> while env
      where
-      loop env1 = do
-        (cond, env2) <- (ExceptT . return) (evaluate condition env1)
-        if isTruthy cond
-          then interpret' [stmt'] env2 >>= loop . snd
+      while env1 = do
+        (cond', env2) <- (ExceptT . return) (evaluate cond env1)
+        if isTruthy cond'
+          then case stmt' of
+            Block stmts' -> interpret' stmts' (local env2) >>= while . snd
+            _            -> interpret' [stmt'] (local env2) >>= while . snd
           else interpret' stmts env2
-    Block stmts' -> interpret' stmts' (local env) >>= interpret' stmts . snd
+    Block stmts' -> interpret' stmts' (local env) >> interpret' stmts env
 
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)
@@ -48,41 +48,40 @@ evaluate (Assignment var expr) env = case get (fst var) env of
     (lit, env') <- evaluate expr env
     Right (lit, define (fst var) lit env')
   Nothing -> Left $ uncurry (RuntimeError "Undefined var") var
-evaluate (Logical op left right) env = evalLogical op left right env
-evaluate (Unary op right) env = (,env) <$> evalUnary op right env
-evaluate (Binary op left right) env = (,env) <$> evalBinary op left right env
+evaluate (Logical op left right) env =
+  visitLogical op left right env
+evaluate (Unary op right) env = do
+  (right', env') <- evaluate right env
+  (,env') <$> visitUnary op right'
+evaluate (Binary op left right) env = do
+  (left', env1) <- evaluate left env
+  (right', env2) <- evaluate right env1
+  (,env2) <$> visitBinary op left' right'
 
-evalLogical ::
+visitLogical ::
   LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
-evalLogical op left right env = do
+visitLogical op left right env = do
   (left', env') <- evaluate left env
   case fst op of
     Or | isTruthy left'          -> Right (left', env')
     And | (not . isTruthy) left' -> Right (left', env')
     _                            -> evaluate right env
 
-evalUnary :: UnaryOp -> Expr -> Env -> Either RuntimeError Literal
-evalUnary op right env
-  | fst op == Minus' = case evaluate right env of
-      Right (Number' n, _) -> Right $ Number' (-n)
-      Right _              -> Left $ RuntimeError "Invalid operand" (show Minus') (snd op)
-      Left err             -> Left err
-  | otherwise = evaluate right env >>= Right . Bool' . not . isTruthy . fst
+visitUnary :: UnaryOp -> Literal -> Either RuntimeError Literal
+visitUnary op right
+  | fst op == Minus' = case right of
+      Number' n -> Right $ Number' (-n)
+      _         -> Left $ RuntimeError "Invalid operand" (show Minus') (snd op)
+  | otherwise = (Right . Bool' . not . isTruthy) right
 
-evalBinary :: BinaryOp -> Expr -> Expr -> Env -> Either RuntimeError Literal
-evalBinary op left right env
+visitBinary :: BinaryOp -> Literal -> Literal -> Either RuntimeError Literal
+visitBinary op left right
   | fst op == EqualEqual = do
-      (left', _) <- evaluate left env
-      (right', _) <- evaluate right env
-      Right $ Bool' (left' == right')
+      Right $ Bool' (left == right)
   | fst op == BangEqual = do
-      (left', _) <- evaluate left env
-      (right', _) <- evaluate right env
-      Right $ Bool' (left' /= right')
+      Right $ Bool' (left /= right)
   | otherwise = do
-      (left', _) <- evaluate left env
-      (right', _) <- evaluate right env
-      case (left', right') of
+      case (left, right) of
         (Number' l, Number' r) -> case fst op of
           Minus        -> Right $ Number' $ l - r
           Slash        -> Right $ Number' $ l / r
@@ -100,7 +99,10 @@ evalBinary op left right env
  where
   invalidOp =
     Left $
-      RuntimeError "Invalid operands" (show . fst $ op) (snd op)
+      RuntimeError
+        "Invalid operands"
+        (show . fst $ op)
+        (snd op)
 
 isTruthy :: Literal -> Bool
 isTruthy (Bool' b) = b
@@ -109,11 +111,7 @@ isTruthy _         = True
 
 -- Error
 
-data RuntimeError = RuntimeError
-  { message  :: String
-  , node     :: String
-  , position :: (Int, Int)
-  }
+data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show RuntimeError where
   show (RuntimeError message node position) =

@@ -36,13 +36,9 @@ block stmts tokens = statement tokens >>= uncurry (block . (: stmts))
 
 declaration :: Parse Stmt
 declaration ((T.Identifier name, _) : rest) = case rest of
-  t : ts
-    | fst t == T.Equal ->
-        expression ts >>= uncurry (statement' . A.Var name)
-  t : _
-    | fst t == T.Semicolon ->
-        statement' (A.Var name $ Literal A.Nil) rest
-  _ -> Left $ ParseError "Expected = after var name." (head rest)
+  t : ts | fst t == T.Equal    -> expression ts >>= uncurry (statement' . A.Var name)
+  t : _ | fst t == T.Semicolon -> statement' (A.Var name $ Literal A.Nil) rest
+  _                            -> Left $ ParseError "Expected = after var name." (head rest)
 declaration ts = Left $ ParseError "Expected var name." (head ts)
 
 ifStatement :: Parse Stmt
@@ -77,7 +73,6 @@ for (token : tokens) | fst token == T.LeftParen = do
       case rest of
         (T.Semicolon, _) : ts' -> return (Just (Expr expr), ts')
         _ -> Left $ ParseError "Expected ';' after loop initializer" (head rest)
-
   (condition, afterCondn) <- case afterInit of
     t : ts | fst t == T.Semicolon -> return (Literal (Bool' True), ts)
     _ -> do
@@ -85,7 +80,6 @@ for (token : tokens) | fst token == T.LeftParen = do
       case rest of
         t' : ts' | fst t' == T.Semicolon -> return (condExpr, ts')
         _ -> Left $ ParseError "Expected ';' after loop condition" (head rest)
-
   (increment, afterInc) <- case afterCondn of
     t : ts | fst t == T.RightParen -> return (Nothing, ts)
     _ -> do
@@ -93,7 +87,6 @@ for (token : tokens) | fst token == T.LeftParen = do
       case afterInc of
         t' : ts' | fst t' == T.RightParen -> return (Just incExpr, ts')
         _ -> Left $ ParseError "Expected ')' after increment" (head afterInc)
-
   (stmt, afterStmt) <- statement afterInc
   let body = case increment of
         Nothing  -> stmt
@@ -239,18 +232,15 @@ primary (t : ts) = case fst t of
 
 -- Error
 
-data ParseError = ParseError
-  { message :: String
-  , token   :: Token
-  }
+data ParseError = ParseError String Token
 
 instance Show ParseError where
-  show (ParseError message (token_type, position)) =
+  show (ParseError message (token, position)) =
     "\n\ESC[31m"
       ++ "Parse Error - "
       ++ "\ESC[0m"
       ++ message
       ++ "\nTokenType - "
-      ++ show token_type
+      ++ show token
       ++ "\nPosition - "
       ++ show position
