@@ -15,10 +15,9 @@ interpret statements = runExceptT (interpret' statements global)
       (ExceptT . return) (evaluate expr env) >>= interpret' stmts . snd
     Var name expr ->
       (ExceptT . return) (evaluate expr env) >>= interpret' stmts . uncurry (define name)
-    Print expr -> do
-      (lit, env') <- (ExceptT . return) (evaluate expr env)
-      (liftIO . print) lit
-      interpret' stmts env'
+    Print expr ->
+      (ExceptT . return) (evaluate expr env) >>= \(lit, env') ->
+        (liftIO . print) lit >> interpret' stmts env'
     If cond thenStmt elseStmt ->
       (ExceptT . return) (evaluate cond env) >>= \(cond', env') ->
         if isTruthy cond'
@@ -28,14 +27,17 @@ interpret statements = runExceptT (interpret' statements global)
             Nothing    -> interpret' stmts env'
     While cond stmt' -> while env
      where
-      while env1 = do
-        (cond', env2) <- (ExceptT . return) (evaluate cond env1)
-        if isTruthy cond'
-          then case stmt' of
-            Block stmts' -> interpret' stmts' (local env2) >>= while . snd
-            _            -> interpret' [stmt'] (local env2) >>= while . snd
-          else interpret' stmts env2
-    Block stmts' -> interpret' stmts' (local env) >> interpret' stmts env
+      while env1 =
+        (ExceptT . return) (evaluate cond env1) >>= \(cond', env2) ->
+          if isTruthy cond'
+            then case stmt' of
+              Block stmts' -> interpret' stmts' (local env2) >>= while . snd
+              _            -> interpret' [stmt'] (local env2) >>= while . snd
+            else interpret' stmts env2
+    Block stmts' ->
+      interpret' stmts' (local env) >> interpret' stmts env
+
+--
 
 evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
 evaluate (Literal lit) env = Right (lit, env)
@@ -44,9 +46,9 @@ evaluate (Variable var) env = case get (fst var) env of
   Just value -> Right (value, env)
   Nothing    -> Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Assignment var expr) env = case get (fst var) env of
-  Just _ -> do
-    (lit, env') <- evaluate expr env
-    Right (lit, define (fst var) lit env')
+  Just _ ->
+    evaluate expr env >>= \(lit, env') ->
+      Right (lit, define (fst var) lit env')
   Nothing -> Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Logical op left right) env =
   visitLogical op left right env
@@ -57,6 +59,20 @@ evaluate (Binary op left right) env = do
   (left', env1) <- evaluate left env
   (right', env2) <- evaluate right env1
   (,env2) <$> visitBinary op left' right'
+evaluate (Call callee args) env = do
+  (callee', env1) <- evaluate callee env
+  (args', env2) <- visitArgs args env1
+  evaluate callee env
+
+--
+
+visitArgs :: [Expr] -> Env -> Either RuntimeError ([Literal], Env)
+visitArgs = visit []
+ where
+  visit lits [] env = Right (reverse lits, env)
+  visit lits (arg : args) env =
+    evaluate arg env >>= \(lit, env') ->
+      visit (lit : lits) args env'
 
 visitLogical ::
   LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
@@ -97,17 +113,8 @@ visitBinary op left right
           _    -> invalidOp
         _ -> invalidOp
  where
-  invalidOp =
-    Left $
-      RuntimeError
-        "Invalid operands"
-        (show . fst $ op)
-        (snd op)
-
-isTruthy :: Literal -> Bool
-isTruthy (Bool' b) = b
-isTruthy Nil       = False
-isTruthy _         = True
+  node = show . fst $ op
+  invalidOp = Left $ RuntimeError "Invalid operands" node (snd op)
 
 -- Error
 
@@ -119,7 +126,7 @@ instance Show RuntimeError where
       ++ "Runtime Error - "
       ++ "\ESC[0m"
       ++ message
-      ++ "\nNode - "
+      ++ "\nNode          - "
       ++ node
-      ++ "\nPosition - "
+      ++ "\nPosition      - "
       ++ show position

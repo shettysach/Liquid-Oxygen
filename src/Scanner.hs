@@ -34,7 +34,7 @@ scanTokens chars@(c : cs) pos@(line, col)
       case cs of
         '/' : cs1 ->
           let cs2 = dropWhile (/= '\n') cs1
-           in scanTokens cs2 (line + 1, 1)
+           in scanTokens cs2 (line, 1)
         _ ->
           let token = (Slash, pos)
            in (token :) <$> scanTokens cs (line, col + 1)
@@ -115,7 +115,7 @@ instance Show ScanError where
       ++ "Scan Error - "
       ++ "\ESC[0m"
       ++ message
-      ++ "\nLexeme - "
+      ++ "\nLexeme     - "
       ++ lexeme
-      ++ "\nPosition - "
+      ++ "\nPosition   - "
       ++ show position

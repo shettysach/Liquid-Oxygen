@@ -13,6 +13,7 @@ data Expr
   = Literal Literal
   | Variable Variable
   | Assignment Variable Expr
+  | Call Expr [Expr]
   | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
   | Logical LogicalOp Expr Expr
@@ -41,11 +42,19 @@ data BinaryOp'
 data LogicalOp' = And | Or
   deriving (Show)
 
-type Position a = (a, (Int, Int))
-type Variable = Position String
-type UnaryOp = Position UnaryOp'
-type BinaryOp = Position BinaryOp'
-type LogicalOp = Position LogicalOp'
+type Positioned a = (a, (Int, Int))
+
+type Variable = Positioned String
+type UnaryOp = Positioned UnaryOp'
+type BinaryOp = Positioned BinaryOp'
+type LogicalOp = Positioned LogicalOp'
+
+-- Bool
+
+isTruthy :: Literal -> Bool
+isTruthy (Bool' b) = b
+isTruthy Nil       = False
+isTruthy _         = True
 
 -- Show
 
