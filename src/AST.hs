@@ -49,13 +49,6 @@ type UnaryOp = Positioned UnaryOp'
 type BinaryOp = Positioned BinaryOp'
 type LogicalOp = Positioned LogicalOp'
 
--- Bool
-
-isTruthy :: Literal -> Bool
-isTruthy (Bool' b) = b
-isTruthy Nil       = False
-isTruthy _         = True
-
 -- Show
 
 instance Show Literal where
