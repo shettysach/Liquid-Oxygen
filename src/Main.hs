@@ -15,5 +15,4 @@ main = do
         Right tokens -> case parse tokens of
           Left err         -> print err
           Right statements -> interpret statements >>= either print (void <$> return)
-    -- Right statements -> print statements
     _ -> putStrLn "Usage: lox <script>"

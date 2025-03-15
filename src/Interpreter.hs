@@ -4,6 +4,8 @@ import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
 
 import AST
+import Environment
+import Error                      (RuntimeError (RuntimeError))
 
 interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
 interpret statements = runExceptT (interpret' statements global)
@@ -35,6 +37,12 @@ interpret statements = runExceptT (interpret' statements global)
             else interpret' stmts env2
     Block stmts' ->
       interpret' stmts' (local env) >> interpret' stmts env
+    Fun name params stmts' -> do
+      let callable args env1 =
+            let env2 = foldr (uncurry define) (local env1) (zip params args)
+             in runExceptT $ interpret' stmts' env2
+      let fun = Function' callable (length params)
+      interpret' stmts (define name fun env)
 
 --
 
@@ -61,17 +69,9 @@ evaluate (Binary op left right) env = do
 evaluate (Call callee args) env = do
   (callee', env1) <- evaluate callee env
   (args', env2) <- visitArgs args env1
-  evaluate callee env
+  visitCall callee' args' env2
 
 --
-
-visitArgs :: [Expr] -> Env -> Either RuntimeError ([Literal], Env)
-visitArgs = visit []
- where
-  visit lits [] env = Right (reverse lits, env)
-  visit lits (arg : args) env =
-    evaluate arg env >>= \(lit, env') ->
-      visit (lit : lits) args env'
 
 visitLogical ::
   LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
@@ -106,11 +106,29 @@ visitBinary op left right
           GreaterEqual -> Right $ Bool' $ l >= r
           Less         -> Right $ Bool' $ l < r
           LessEqual    -> Right $ Bool' $ l <= r
-          _            -> invalidOp
+          _            -> Left invalid
         (String' l, String' r) -> case fst op of
           Plus -> Right $ String' $ l ++ r
-          _    -> invalidOp
-        _ -> invalidOp
+          _    -> Left invalid
+        _ -> Left invalid
  where
-  node = show . fst $ op
-  invalidOp = Left $ RuntimeError "Invalid operands" node (snd op)
+  invalid =
+    RuntimeError
+      "Invalid operands"
+      (show . fst $ op)
+      (snd op)
+
+-- TODO: Use fold
+visitArgs :: [Expr] -> Env -> Either RuntimeError ([Literal], Env)
+visitArgs = visit []
+ where
+  visit lits [] env = Right (reverse lits, env)
+  visit lits (arg : args) env =
+    evaluate arg env >>= \(lit, env') -> visit (lit : lits) args env'
+
+visitCall :: Literal -> [Literal] -> Env -> Either RuntimeError (Literal, Env)
+visitCall (Function' fun arity) args env
+  | length args /= arity = Left $ RuntimeError "Arity" (show arity) (0, 0)
+  -- \| otherwise = fun args env
+  | otherwise = undefined
+visitCall _ _ _ = Left $ RuntimeError "Calling non-function" "idk" (0, 0)
