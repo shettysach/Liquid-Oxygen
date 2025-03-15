@@ -13,7 +13,6 @@ executable liquid-oxygen
     main-is:          Main.hs
     other-modules:    
       AST
-      Environment
       Interpreter
       Parser
       Scanner

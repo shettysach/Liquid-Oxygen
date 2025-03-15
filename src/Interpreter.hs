@@ -4,13 +4,11 @@ import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
 
 import AST
-import Environment
 
-interpret :: [Stmt] -> IO (Either RuntimeError (Value, Env))
+interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
 interpret statements = runExceptT (interpret' statements global)
  where
-  interpret' :: [Stmt] -> Env -> ExceptT RuntimeError IO (Value, Env)
-  interpret' [] env = return (Literal' Nil, env)
+  interpret' [] env = return (Nil, env)
   interpret' (stmt : stmts) env = case stmt of
     Expr expr ->
       (ExceptT . return) (evaluate expr env) >>= interpret' stmts . snd
@@ -40,8 +38,8 @@ interpret statements = runExceptT (interpret' statements global)
 
 --
 
-evaluate :: Expr -> Env -> Either RuntimeError (Value, Env)
-evaluate (Literal lit) env = Right (Literal' lit, env)
+evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
+evaluate (Literal lit) env = Right (lit, env)
 evaluate (Grouping expr) env = evaluate expr env
 evaluate (Variable var) env = case get (fst var) env of
   Just value -> Right (value, env)
@@ -67,7 +65,7 @@ evaluate (Call callee args) env = do
 
 --
 
-visitArgs :: [Expr] -> Env -> Either RuntimeError ([Value], Env)
+visitArgs :: [Expr] -> Env -> Either RuntimeError ([Literal], Env)
 visitArgs = visit []
  where
   visit lits [] env = Right (reverse lits, env)
@@ -76,7 +74,7 @@ visitArgs = visit []
       visit (lit : lits) args env'
 
 visitLogical ::
-  LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Value, Env)
+  LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
 visitLogical op left right env = do
   (left', env') <- evaluate left env
   case fst op of
@@ -84,42 +82,35 @@ visitLogical op left right env = do
     And | (not . isTruthy) left' -> Right (left', env')
     _                            -> evaluate right env
 
-visitUnary :: UnaryOp -> Value -> Either RuntimeError Value
+visitUnary :: UnaryOp -> Literal -> Either RuntimeError Literal
 visitUnary op right
   | fst op == Minus' = case right of
-      Literal' (Number' n) -> Right $ Literal' $ Number' (-n)
-      _                    -> Left $ RuntimeError "Invalid operand" (show Minus') (snd op)
-  | otherwise = (Right . Literal' . Bool' . not . isTruthy) right
+      Number' n -> Right $ Number' (-n)
+      _         -> Left $ RuntimeError "Invalid operand" (show Minus') (snd op)
+  | otherwise = (Right . Bool' . not . isTruthy) right
 
-visitBinary :: BinaryOp -> Value -> Value -> Either RuntimeError Value
+visitBinary :: BinaryOp -> Literal -> Literal -> Either RuntimeError Literal
 visitBinary op left right
   | fst op == EqualEqual = do
-      Right $ Literal' $ Bool' (left == right)
+      Right $ Bool' (left == right)
   | fst op == BangEqual = do
-      Right $ Literal' $ Bool' (left /= right)
+      Right $ Bool' (left /= right)
   | otherwise = do
       case (left, right) of
-        (Literal' (Number' l), Literal' (Number' r)) -> case fst op of
-          Minus        -> Right $ Literal' $ Number' $ l - r
-          Slash        -> Right $ Literal' $ Number' $ l / r
-          Star         -> Right $ Literal' $ Number' $ l * r
-          Plus         -> Right $ Literal' $ Number' $ l + r
-          Greater      -> Right $ Literal' $ Bool' $ l > r
-          GreaterEqual -> Right $ Literal' $ Bool' $ l >= r
-          Less         -> Right $ Literal' $ Bool' $ l < r
-          LessEqual    -> Right $ Literal' $ Bool' $ l <= r
+        (Number' l, Number' r) -> case fst op of
+          Minus        -> Right $ Number' $ l - r
+          Slash        -> Right $ Number' $ l / r
+          Star         -> Right $ Number' $ l * r
+          Plus         -> Right $ Number' $ l + r
+          Greater      -> Right $ Bool' $ l > r
+          GreaterEqual -> Right $ Bool' $ l >= r
+          Less         -> Right $ Bool' $ l < r
+          LessEqual    -> Right $ Bool' $ l <= r
           _            -> invalidOp
-        (Literal' (String' l), Literal' (String' r)) -> case fst op of
-          Plus -> Right $ Literal' $ String' $ l ++ r
+        (String' l, String' r) -> case fst op of
+          Plus -> Right $ String' $ l ++ r
           _    -> invalidOp
         _ -> invalidOp
  where
   node = show . fst $ op
   invalidOp = Left $ RuntimeError "Invalid operands" node (snd op)
-
--- isTruthy
-
-isTruthy :: Value -> Bool
-isTruthy (Literal' (Bool' b)) = b
-isTruthy (Literal' Nil)       = False
-isTruthy _                    = True
