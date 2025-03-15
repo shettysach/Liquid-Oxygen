@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Interpreter where
 
 import Control.Monad.IO.Class     (liftIO)
@@ -13,14 +15,14 @@ interpret statements = runExceptT (interpret' statements global)
   interpret' [] env = return (Nil, env)
   interpret' (stmt : stmts) env = case stmt of
     Expr expr ->
-      (ExceptT . return) (evaluate expr env) >>= interpret' stmts . snd
+      ExceptT (evaluate expr env) >>= interpret' stmts . snd
     Var name expr ->
-      (ExceptT . return) (evaluate expr env) >>= interpret' stmts . uncurry (define name)
+      ExceptT (evaluate expr env) >>= interpret' stmts . uncurry (define name)
     Print expr ->
-      (ExceptT . return) (evaluate expr env) >>= \(lit, env') ->
+      ExceptT (evaluate expr env) >>= \(lit, env') ->
         (liftIO . print) lit >> interpret' stmts env'
     If cond thenStmt elseStmt ->
-      (ExceptT . return) (evaluate cond env) >>= \(cond', env') ->
+      ExceptT (evaluate cond env) >>= \(cond', env') ->
         if isTruthy cond'
           then interpret' (thenStmt : stmts) env'
           else case elseStmt of
@@ -29,7 +31,7 @@ interpret statements = runExceptT (interpret' statements global)
     While cond stmt' -> while env
      where
       while env1 =
-        (ExceptT . return) (evaluate cond env1) >>= \(cond', env2) ->
+        ExceptT (evaluate cond env1) >>= \(cond', env2) ->
           if isTruthy cond'
             then case stmt' of
               Block stmts' -> interpret' stmts' (local env2) >>= while . snd
@@ -46,41 +48,44 @@ interpret statements = runExceptT (interpret' statements global)
 
 --
 
-evaluate :: Expr -> Env -> Either RuntimeError (Literal, Env)
-evaluate (Literal lit) env = Right (lit, env)
+evaluate :: Expr -> Env -> IO (Either RuntimeError (Literal, Env))
+evaluate (Literal lit) env = return $ Right (lit, env)
 evaluate (Grouping expr) env = evaluate expr env
 evaluate (Variable var) env = case get (fst var) env of
-  Just value -> Right (value, env)
-  Nothing    -> Left $ uncurry (RuntimeError "Undefined var") var
+  Just value -> return $ Right (value, env)
+  Nothing    -> return $ Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Assignment var expr) env = case get (fst var) env of
   Just _ ->
-    evaluate expr env >>= \(lit, env') ->
-      Right (lit, define (fst var) lit env')
-  Nothing -> Left $ uncurry (RuntimeError "Undefined var") var
+    evaluate expr env >>= \case
+      Left err -> return $ Left err
+      Right (lit, env') -> return $ Right (lit, define (fst var) lit env')
+  Nothing -> return $ Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Logical op left right) env =
   visitLogical op left right env
-evaluate (Unary op right) env = do
-  (right', env') <- evaluate right env
-  (,env') <$> visitUnary op right'
-evaluate (Binary op left right) env = do
-  (left', env1) <- evaluate left env
-  (right', env2) <- evaluate right env1
-  (,env2) <$> visitBinary op left' right'
-evaluate (Call callee args) env = do
-  (callee', env1) <- evaluate callee env
-  (args', env2) <- visitArgs args env1
-  visitCall callee' args' env2
+evaluate (Unary op right) env = runExceptT $ do
+  (right', env') <- ExceptT $ evaluate right env
+  result <- ExceptT $ return $ visitUnary op right'
+  return (result, env')
+evaluate (Binary op left right) env = runExceptT $ do
+  (left', env1) <- ExceptT $ evaluate left env
+  (right', env2) <- ExceptT $ evaluate right env1
+  result <- ExceptT $ return $ visitBinary op left' right'
+  return (result, env2)
+evaluate (Call callee args) env = runExceptT $ do
+  (callee', env1) <- ExceptT $ evaluate callee env
+  (args', env2) <- ExceptT $ visitArgs args env1
+  ExceptT $ visitCall callee' args' env2
 
 --
 
 visitLogical ::
-  LogicalOp -> Expr -> Expr -> Env -> Either RuntimeError (Literal, Env)
-visitLogical op left right env = do
-  (left', env') <- evaluate left env
+  LogicalOp -> Expr -> Expr -> Env -> IO (Either RuntimeError (Literal, Env))
+visitLogical op left right env = runExceptT $ do
+  (left', env') <- ExceptT $ evaluate left env
   case fst op of
-    Or | isTruthy left'          -> Right (left', env')
-    And | (not . isTruthy) left' -> Right (left', env')
-    _                            -> evaluate right env
+    Or | isTruthy left'          -> return (left', env')
+    And | (not . isTruthy) left' -> return (left', env')
+    _                            -> ExceptT $ evaluate right env'
 
 visitUnary :: UnaryOp -> Literal -> Either RuntimeError Literal
 visitUnary op right
@@ -119,16 +124,17 @@ visitBinary op left right
       (snd op)
 
 -- TODO: Use fold
-visitArgs :: [Expr] -> Env -> Either RuntimeError ([Literal], Env)
-visitArgs = visit []
+visitArgs :: [Expr] -> Env -> IO (Either RuntimeError ([Literal], Env))
+visitArgs args env = runExceptT $ visit [] args env
  where
-  visit lits [] env = Right (reverse lits, env)
-  visit lits (arg : args) env =
-    evaluate arg env >>= \(lit, env') -> visit (lit : lits) args env'
+  visit :: [Literal] -> [Expr] -> Env -> ExceptT RuntimeError IO ([Literal], Env)
+  visit lits [] env1 = return (reverse lits, env1)
+  visit lits (arg : args') env1 = do
+    (lit, env2) <- ExceptT $ evaluate arg env1
+    visit (lit : lits) args' env2
 
-visitCall :: Literal -> [Literal] -> Env -> Either RuntimeError (Literal, Env)
+visitCall :: Literal -> Callable
 visitCall (Function' fun arity) args env
-  | length args /= arity = Left $ RuntimeError "Arity" (show arity) (0, 0)
-  -- \| otherwise = fun args env
-  | otherwise = undefined
-visitCall _ _ _ = Left $ RuntimeError "Calling non-function" "idk" (0, 0)
+  | length args /= arity = return $ Left $ RuntimeError "Arity" (show arity) (0, 0)
+  | otherwise = fun args env
+visitCall _ _ _ = return $ Left $ RuntimeError "Calling non-function" "idk" (0, 0)
