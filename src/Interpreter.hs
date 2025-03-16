@@ -2,6 +2,8 @@
 
 module Interpreter where
 
+import Control.Arrow              (first)
+import Control.Monad              (foldM)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
 
@@ -39,12 +41,13 @@ interpret statements = runExceptT (interpret' statements global)
             else interpret' stmts env2
     Block stmts' ->
       interpret' stmts' (local env) >> interpret' stmts env
-    Fun name params stmts' -> do
+    Fun name params stmts' ->
       let callable args env1 =
             let env2 = foldr (uncurry define) (local env1) (zip params args)
-             in runExceptT $ interpret' stmts' env2
-      let fun = Function' callable (length params)
-      interpret' stmts (define name fun env)
+             in runExceptT (interpret' stmts' env2)
+          fun = Function' callable (length params)
+       in interpret' stmts (define name fun env)
+    Return expr -> ExceptT (evaluate expr env)
 
 --
 
@@ -72,11 +75,20 @@ evaluate (Binary op left right) env = runExceptT $ do
   result <- ExceptT $ return $ visitBinary op left' right'
   return (result, env2)
 evaluate (Call callee args) env = runExceptT $ do
-  (callee', env1) <- ExceptT $ evaluate callee env
-  (args', env2) <- ExceptT $ visitArgs args env1
-  ExceptT $ visitCall callee' args' env2
+  (callee', env1) <- ExceptT (evaluate callee env)
+  (args', env2) <- fold args env1
+  ExceptT (visitCall callee' args' env2)
+ where
+  visit (lits, env') arg = first (: lits) <$> ExceptT (evaluate arg env')
+  fold args' env' = first reverse <$> foldM visit ([], env') args'
 
 --
+
+visitCall :: Literal -> [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
+visitCall (Function' fun arity) args env
+  | length args /= arity = return $ Left $ RuntimeError "Arity" (show arity) (0, 0)
+  | otherwise = fun args env
+visitCall _ _ _ = return $ Left $ RuntimeError "Calling non-function" "idk" (0, 0)
 
 visitLogical ::
   LogicalOp -> Expr -> Expr -> Env -> IO (Either RuntimeError (Literal, Env))
@@ -122,19 +134,3 @@ visitBinary op left right
       "Invalid operands"
       (show . fst $ op)
       (snd op)
-
--- TODO: Use fold
-visitArgs :: [Expr] -> Env -> IO (Either RuntimeError ([Literal], Env))
-visitArgs args env = runExceptT $ visit [] args env
- where
-  visit :: [Literal] -> [Expr] -> Env -> ExceptT RuntimeError IO ([Literal], Env)
-  visit lits [] env1 = return (reverse lits, env1)
-  visit lits (arg : args') env1 = do
-    (lit, env2) <- ExceptT $ evaluate arg env1
-    visit (lit : lits) args' env2
-
-visitCall :: Literal -> Callable
-visitCall (Function' fun arity) args env
-  | length args /= arity = return $ Left $ RuntimeError "Arity" (show arity) (0, 0)
-  | otherwise = fun args env
-visitCall _ _ _ = return $ Left $ RuntimeError "Calling non-function" "idk" (0, 0)

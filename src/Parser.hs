@@ -20,9 +20,10 @@ declaration :: Parse Stmt
 declaration [] = undefined
 declaration (t : ts) =
   case fst t of
-    T.Fun       -> function ts
     T.Var       -> varDeclaration ts
     T.Print     -> expression ts >>= uncurry (statement . A.Print)
+    T.Fun       -> function ts
+    T.Return    -> returnStatement ts
     T.LeftBrace -> block [] ts <&> first A.Block
     T.If        -> ifStatement ts
     T.While     -> while ts
@@ -124,6 +125,14 @@ parameters ps ((T.Identifier p, _) : t : ts)
   | fst t == T.RightParen = Right (reverse (p : ps), ts)
   | fst t == T.Comma = parameters (p : ps) ts
 parameters _ tokens = Left $ ParseError "Params error" (head tokens)
+
+returnStatement :: Parse Stmt
+returnStatement (t : ts) | fst t == T.Semicolon = Right (A.Return (Literal A.Nil), ts)
+returnStatement tokens = do
+  (expr, after) <- expression tokens
+  case after of
+    t : ts | fst t == T.Semicolon -> Right (A.Return expr, ts)
+    _                             -> Left $ ParseError "Expected ';'" (head after)
 
 -- Expr
 
@@ -257,10 +266,9 @@ primary (t : ts) = case fst t of
   T.Number' n -> Right (Literal $ A.Number' n, ts)
   T.String' s -> Right (Literal $ A.String' s, ts)
   T.Identifier i -> Right (Variable (i, snd t), ts)
-  T.LeftParen ->
-    expression ts >>= \(expr, rest) ->
-      case rest of
-        t' : ts'
-          | fst t' == T.RightParen -> Right (Grouping expr, ts')
-        _ -> Left $ ParseError "Expected ')' after expr" t
+  T.LeftParen -> do
+    (expr, rest) <- expression ts
+    case rest of
+      t' : ts' | fst t' == T.RightParen -> Right (Grouping expr, ts')
+      _                                 -> Left $ ParseError "Expected ')' after expr" t
   _ -> Left $ ParseError "Expected expr" t

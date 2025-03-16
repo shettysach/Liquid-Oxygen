@@ -11,6 +11,7 @@ data Stmt
   | Print Expr
   | Block [Stmt]
   | Fun String [String] [Stmt]
+  | Return Expr
   deriving (Show)
 
 data Expr
@@ -29,8 +30,7 @@ data Literal
   | String' String
   | Bool' Bool
   | Function' Callable Int
-  | -- | Function' Callable Int Env
-    Nil
+  | Nil
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
