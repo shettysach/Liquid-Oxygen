@@ -8,27 +8,30 @@ import AST           as A
 import Error         (ParseError (ParseError))
 import Token         as T
 
+type Parse a = [Token] -> Either ParseError (a, [Token])
+
+-- * because product type
+(*>>=) :: (Monad m) => m (a, b) -> (a -> b -> m c) -> m c
+x *>>= f = x >>= uncurry f
+
 parse :: [Token] -> Either ParseError [Stmt]
 parse = parse' []
  where
-  parse' stmts [token] | fst token == T.Eof = Right (reverse stmts)
-  parse' stmts tokens = declaration tokens >>= uncurry (parse' . (: stmts))
-
-type Parse a = [Token] -> Either ParseError (a, [Token])
+  parse' stmts [(T.Eof, _)] = Right (reverse stmts)
+  parse' stmts tokens       = declaration tokens *>>= (parse' . (: stmts))
 
 declaration :: Parse Stmt
-declaration [] = undefined
-declaration (t : ts) =
-  case fst t of
-    T.Var       -> varDeclaration ts
-    T.Print     -> expression ts >>= uncurry (statement . A.Print)
-    T.Fun       -> function ts
-    T.Return    -> returnStatement ts
-    T.LeftBrace -> block [] ts <&> first A.Block
-    T.If        -> ifStatement ts
-    T.While     -> while ts
-    T.For       -> for ts
-    _           -> expression (t : ts) >>= uncurry (statement . A.Expr)
+declaration [] = undefined -- NOTE: Unreachable
+declaration (t : ts) = case fst t of
+  T.Var       -> varDeclaration ts
+  T.Print     -> expression ts *>>= (statement . A.Print)
+  T.Fun       -> function ts
+  T.Return    -> returnStatement ts
+  T.LeftBrace -> block [] ts <&> first A.Block
+  T.If        -> ifStatement ts
+  T.While     -> while ts
+  T.For       -> for ts
+  _           -> expression (t : ts) *>>= (statement . A.Expr)
 
 statement :: Stmt -> Parse Stmt
 statement stmt (t : ts) | fst t == T.Semicolon = Right (stmt, ts)
@@ -36,11 +39,11 @@ statement _ tokens = Left $ ParseError "Expected ';'" (head tokens)
 
 block :: [Stmt] -> Parse [Stmt]
 block stmts (t : ts) | fst t == T.RightBrace = Right (reverse stmts, ts)
-block stmts tokens = declaration tokens >>= uncurry (block . (: stmts))
+block stmts tokens = declaration tokens *>>= (block . (: stmts))
 
 varDeclaration :: Parse Stmt
 varDeclaration ((T.Identifier name, _) : t : ts)
-  | fst t == T.Equal = expression ts >>= uncurry (statement . A.Var name)
+  | fst t == T.Equal = expression ts *>>= (statement . A.Var name)
   | fst t == T.Semicolon = statement (A.Var name $ Literal A.Nil) (t : ts)
   | otherwise = Left $ ParseError "Expected = after var name" t
 varDeclaration tokens = Left $ ParseError "Expected var name" (head tokens)
@@ -121,10 +124,11 @@ function ((T.Identifier name, _) : t : ts) | fst t == T.LeftParen = do
 function tokens = Left $ ParseError "Expected identifier" (head tokens)
 
 parameters :: [String] -> Parse [String]
-parameters ps ((T.Identifier p, _) : t : ts)
-  | fst t == T.RightParen = Right (reverse (p : ps), ts)
-  | fst t == T.Comma = parameters (p : ps) ts
-parameters _ tokens = Left $ ParseError "Params error" (head tokens)
+parameters ps (t : ts)
+  | T.RightParen <- fst t = Right (reverse ps, ts)
+  | T.Comma <- fst t = parameters ps ts
+  | T.Identifier p <- fst t = parameters (p : ps) ts
+parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" (head tokens)
 
 returnStatement :: Parse Stmt
 returnStatement (t : ts) | fst t == T.Semicolon = Right (A.Return (Literal A.Nil), ts)
@@ -134,37 +138,36 @@ returnStatement tokens = do
     t : ts | fst t == T.Semicolon -> Right (A.Return expr, ts)
     _                             -> Left $ ParseError "Expected ';'" (head after)
 
--- Expr
-
 expression :: Parse Expr
 expression = assignment
 
 assignment :: Parse Expr
-assignment tokens = Parser.or tokens >>= uncurry assignment'
+assignment tokens = Parser.or tokens >>= assignment'
  where
-  assignment' expr (t : ts)
+  assignment' (expr, t : ts)
     | fst t == T.Equal =
         assignment ts >>= \(value, ts') ->
           case expr of
             Variable var -> Right (A.Assignment var value, ts')
             _            -> Left $ ParseError "Invalid target" t
-  assignment' expr ts = Right (expr, ts)
-
--- Logical
+  assignment' (expr, ts) = Right (expr, ts)
 
 or :: Parse Expr
-or tokens = Parser.and tokens >>= uncurry or'
+or tokens =
+  Parser.and tokens *>>= or'
  where
   or' expr [] = Right (expr, [])
   or' expr (t : ts) =
     case fst t of
-      T.Or -> recurse (A.Or, snd t)
+      T.Or -> recurse A.Or
       _    -> Right (expr, t : ts)
    where
-    recurse op = comparison ts >>= uncurry (or' . Logical op expr)
+    recurse op =
+      Parser.and ts *>>= (or' . Logical (op, snd t) expr)
 
 and :: Parse Expr
-and tokens = equality tokens >>= uncurry and'
+and tokens =
+  equality tokens *>>= and'
  where
   and' expr [] = Right (expr, [])
   and' expr (t : ts) =
@@ -172,57 +175,58 @@ and tokens = equality tokens >>= uncurry and'
       T.And -> recurse A.And
       _     -> Right (expr, t : ts)
    where
-    recurse op = comparison ts >>= uncurry (and' . Logical (op, snd t) expr)
+    recurse op =
+      equality ts *>>= (and' . Logical (op, snd t) expr)
 
 equality :: Parse Expr
-equality tokens = comparison tokens >>= uncurry equality'
+equality tokens = comparison tokens *>>= equality'
  where
   equality' expr [] = Right (expr, [])
-  equality' expr (t : ts) =
-    case fst t of
-      T.BangEqual  -> recurse A.BangEqual
-      T.EqualEqual -> recurse A.EqualEqual
-      _            -> Right (expr, t : ts)
+  equality' expr (t : ts) = case fst t of
+    T.BangEqual  -> recurse A.BangEqual
+    T.EqualEqual -> recurse A.EqualEqual
+    _            -> Right (expr, t : ts)
    where
-    recurse op = comparison ts >>= uncurry (equality' . Binary (op, snd t) expr)
+    recurse op =
+      comparison ts *>>= (equality' . Binary (op, snd t) expr)
 
 comparison :: Parse Expr
-comparison tokens = term tokens >>= uncurry comparison'
+comparison tokens = term tokens *>>= comparison'
  where
   comparison' expr [] = Right (expr, [])
-  comparison' expr (t : ts) =
-    case fst t of
-      T.Greater      -> recurse A.Greater
-      T.GreaterEqual -> recurse A.GreaterEqual
-      T.Less         -> recurse A.Less
-      T.LessEqual    -> recurse A.LessEqual
-      _              -> Right (expr, t : ts)
+  comparison' expr (t : ts) = case fst t of
+    T.Greater      -> recurse A.Greater
+    T.GreaterEqual -> recurse A.GreaterEqual
+    T.Less         -> recurse A.Less
+    T.LessEqual    -> recurse A.LessEqual
+    _              -> Right (expr, t : ts)
    where
-    recurse op = term ts >>= uncurry (comparison' . Binary (op, snd t) expr)
+    recurse op =
+      term ts *>>= (comparison' . Binary (op, snd t) expr)
 
 term :: Parse Expr
 term tokens = factor tokens >>= uncurry term'
  where
   term' expr [] = Right (expr, [])
-  term' expr (t : ts) =
-    case fst t of
-      T.Minus -> recurse A.Minus
-      T.Plus  -> recurse A.Plus
-      _       -> Right (expr, t : ts)
+  term' expr (t : ts) = case fst t of
+    T.Minus -> recurse A.Minus
+    T.Plus  -> recurse A.Plus
+    _       -> Right (expr, t : ts)
    where
-    recurse op = factor ts >>= uncurry (term' . Binary (op, snd t) expr)
+    recurse op =
+      factor ts >>= uncurry (term' . Binary (op, snd t) expr)
 
 factor :: Parse Expr
-factor tokens = unary tokens >>= uncurry factor'
+factor tokens = unary tokens *>>= factor'
  where
   factor' expr [] = Right (expr, [])
-  factor' expr (t : ts) =
-    case fst t of
-      T.Slash -> recurse A.Slash
-      T.Star  -> recurse A.Star
-      _       -> Right (expr, t : ts)
+  factor' expr (t : ts) = case fst t of
+    T.Slash -> recurse A.Slash
+    T.Star  -> recurse A.Star
+    _       -> Right (expr, t : ts)
    where
-    recurse op = unary ts >>= uncurry (factor' . Binary (op, snd t) expr)
+    recurse op =
+      unary ts *>>= (factor' . Binary (op, snd t) expr)
 
 unary :: Parse Expr
 unary [] = call []
@@ -233,13 +237,12 @@ unary (t : ts) =
     _       -> call (t : ts)
 
 call :: Parse Expr
-call tokens = primary tokens >>= uncurry call'
+call tokens = primary tokens *>>= call'
  where
   call' expr [] = Right (expr, [])
-  call' expr (t : ts) =
-    case fst t of
-      T.LeftParen -> finish expr ts >>= uncurry call'
-      _           -> Right (expr, t : ts)
+  call' expr (t : ts) = case fst t of
+    T.LeftParen -> finish expr ts *>>= call'
+    _           -> Right (expr, t : ts)
 
   finish callee tokens' = do
     (args, rest) <- arguments tokens'
@@ -258,7 +261,7 @@ call tokens = primary tokens >>= uncurry call'
       _                              -> Right ([arg], rest)
 
 primary :: Parse Expr
-primary [] = undefined
+primary [] = undefined -- NOTE: Unreachable
 primary (t : ts) = case fst t of
   T.False' -> Right (Literal $ Bool' False, ts)
   T.True' -> Right (Literal $ Bool' True, ts)

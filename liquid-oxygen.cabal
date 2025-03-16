@@ -17,6 +17,7 @@ executable liquid-oxygen
       Error
       Interpreter
       Parser
+      Resolver
       Scanner
       Token
     build-depends:    

@@ -13,41 +13,43 @@ import Error                      (RuntimeError (RuntimeError))
 
 interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
 interpret statements = runExceptT (interpret' statements global)
- where
-  interpret' [] env = return (Nil, env)
-  interpret' (stmt : stmts) env = case stmt of
-    Expr expr ->
-      ExceptT (evaluate expr env) >>= interpret' stmts . snd
-    Var name expr ->
-      ExceptT (evaluate expr env) >>= interpret' stmts . uncurry (define name)
-    Print expr ->
-      ExceptT (evaluate expr env) >>= \(lit, env') ->
-        (liftIO . print) lit >> interpret' stmts env'
-    If cond thenStmt elseStmt ->
-      ExceptT (evaluate cond env) >>= \(cond', env') ->
+
+interpret' :: [Stmt] -> Env -> ExceptT RuntimeError IO (Literal, Env)
+interpret' [] env = return (Nil, env)
+interpret' (stmt : stmts) env = case stmt of
+  Return expr ->
+    ExceptT (evaluate expr env)
+  Expr expr ->
+    ExceptT (evaluate expr env) >>= interpret' stmts . snd
+  Var name expr ->
+    ExceptT (evaluate expr env) >>= interpret' stmts . uncurry (define name)
+  Block stmts' ->
+    interpret' stmts' (local env) >> interpret' stmts env
+  Fun name params stmts' ->
+    let callable args env' =
+          let envf = foldr (uncurry define) (local env') (zip params args)
+           in runExceptT (interpret' stmts' envf)
+        fun = Function' callable (length params)
+     in interpret' stmts (define name fun env)
+  Print expr ->
+    ExceptT (evaluate expr env) >>= \(lit, env') ->
+      (liftIO . print) lit >> interpret' stmts env'
+  If cond thenStmt elseStmt ->
+    ExceptT (evaluate cond env) >>= \(cond', env') ->
+      if isTruthy cond'
+        then interpret' (thenStmt : stmts) env'
+        else case elseStmt of
+          Just stmt' -> interpret' (stmt' : stmts) env'
+          Nothing    -> interpret' stmts env'
+  While cond stmt' -> while env
+   where
+    while env' =
+      ExceptT (evaluate cond env') >>= \(cond', envc) ->
         if isTruthy cond'
-          then interpret' (thenStmt : stmts) env'
-          else case elseStmt of
-            Just stmt' -> interpret' (stmt' : stmts) env'
-            Nothing    -> interpret' stmts env'
-    While cond stmt' -> while env
-     where
-      while env1 =
-        ExceptT (evaluate cond env1) >>= \(cond', env2) ->
-          if isTruthy cond'
-            then case stmt' of
-              Block stmts' -> interpret' stmts' (local env2) >>= while . snd
-              _            -> interpret' [stmt'] (local env2) >>= while . snd
-            else interpret' stmts env2
-    Block stmts' ->
-      interpret' stmts' (local env) >> interpret' stmts env
-    Fun name params stmts' ->
-      let callable args env1 =
-            let env2 = foldr (uncurry define) (local env1) (zip params args)
-             in runExceptT (interpret' stmts' env2)
-          fun = Function' callable (length params)
-       in interpret' stmts (define name fun env)
-    Return expr -> ExceptT (evaluate expr env)
+          then case stmt' of
+            Block stmts' -> interpret' stmts' (local envc) >>= while . snd
+            _            -> interpret' [stmt'] (local envc) >>= while . snd
+          else interpret' stmts envc
 
 --
 
@@ -70,14 +72,14 @@ evaluate (Unary op right) env = runExceptT $ do
   result <- ExceptT $ return $ visitUnary op right'
   return (result, env')
 evaluate (Binary op left right) env = runExceptT $ do
-  (left', env1) <- ExceptT $ evaluate left env
-  (right', env2) <- ExceptT $ evaluate right env1
+  (left', envl) <- ExceptT $ evaluate left env
+  (right', envr) <- ExceptT $ evaluate right envl
   result <- ExceptT $ return $ visitBinary op left' right'
-  return (result, env2)
+  return (result, envr)
 evaluate (Call callee args) env = runExceptT $ do
-  (callee', env1) <- ExceptT (evaluate callee env)
-  (args', env2) <- fold args env1
-  ExceptT (visitCall callee' args' env2)
+  (callee', envc) <- ExceptT (evaluate callee env)
+  (args', envf) <- fold args envc
+  ExceptT (visitCall callee' args' envf)
  where
   visit (lits, env') arg = first (: lits) <$> ExceptT (evaluate arg env')
   fold args' env' = first reverse <$> foldM visit ([], env') args'
