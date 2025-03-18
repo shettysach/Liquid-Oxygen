@@ -12,9 +12,9 @@ global = Env Map.empty Nothing
 local :: Env -> Env
 local env = Env Map.empty (Just env)
 
-dropScope :: Env -> Env
-dropScope (Env _ (Just prev)) = prev
-dropScope env                 = env
+drop :: Env -> Env
+drop (Env _ (Just prev)) = prev
+drop env                 = env
 
 get :: String -> Env -> Maybe Literal
 get name (Env scope prev) = Map.lookup name scope <|> (prev >>= get name)

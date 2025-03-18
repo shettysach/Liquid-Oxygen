@@ -1,0 +1,7 @@
+fun exp(a, n) {
+    var r = 1;
+    for (var i = 0; i < n; i = i + 1) r = r * a;
+    return r;
+}
+
+print exp(3, 3);

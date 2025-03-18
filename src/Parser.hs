@@ -9,7 +9,6 @@ import Token         as T
 
 type Parse a = [Token] -> Either ParseError (a, [Token])
 
--- * because product type
 (*>>=) :: (Monad m) => m (a, b) -> (a -> b -> m c) -> m c
 x *>>= f = x >>= uncurry f
 

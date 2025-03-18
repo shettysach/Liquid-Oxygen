@@ -2,13 +2,14 @@
 
 module Interpreter where
 
-import Control.Arrow              (first)
+import Control.Arrow              (first, second)
 import Control.Monad              (foldM)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
+import Data.Functor               ((<&>))
 
 import AST
-import Environment
+import Environment                as Env
 import Error                      (RuntimeError (RuntimeError))
 
 interpret :: [Stmt] -> IO (Either RuntimeError (Literal, Env))
@@ -17,21 +18,24 @@ interpret statements = runExceptT (interpret' statements global)
 interpret' :: [Stmt] -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpret' [] env = return (Nil, env)
 interpret' (stmt : stmts) env = case stmt of
-  Return expr ->
-    ExceptT (evaluate expr env)
   Expr expr ->
     ExceptT (evaluate expr env) >>= interpret' stmts . snd
   Var name expr ->
     ExceptT (evaluate expr env) >>= interpret' stmts . uncurry (define name)
-  Fun name params stmts' ->
-    let callable args env' =
-          let envf = foldr (uncurry define) (local env') (zip params args)
-           in runExceptT (interpret' stmts' envf)
-        fun = Function' callable (length params)
-     in interpret' stmts (define name fun env)
+  Return expr ->
+    ExceptT (evaluate expr env) <&> second Env.drop
   Print expr ->
     ExceptT (evaluate expr env) >>= \(lit, env') ->
       (liftIO . print) lit >> interpret' stmts env'
+  Block stmts' ->
+    interpret' stmts' (local env) >>= interpret' stmts . Env.drop . snd
+  Fun name params stmts' ->
+    interpret' stmts (define name fun env)
+   where
+    fun = Function' callable (length params)
+    callable args env' =
+      let envf = foldr (uncurry define) (local env') (zip params args)
+       in runExceptT (interpret' stmts' envf)
   If cond thenStmt elseStmt ->
     ExceptT (evaluate cond env) >>= \(cond', env') ->
       if isTruthy cond'
@@ -39,11 +43,9 @@ interpret' (stmt : stmts) env = case stmt of
         else case elseStmt of
           Just stmt' -> interpret' (stmt' : stmts) env'
           Nothing    -> interpret' stmts env'
-  Block stmts' -> do
-    interpret' stmts' (local env) >>= interpret' stmts . dropScope . snd
   While cond stmt' -> while env
    where
-    while env' = do
+    while env' =
       ExceptT (evaluate cond env') >>= \(cond', envc) ->
         if isTruthy cond'
           then case stmt' of
