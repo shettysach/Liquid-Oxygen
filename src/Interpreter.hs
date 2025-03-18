@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module Interpreter where
 
@@ -23,8 +23,6 @@ interpret' (stmt : stmts) env = case stmt of
     ExceptT (evaluate expr env) >>= interpret' stmts . snd
   Var name expr ->
     ExceptT (evaluate expr env) >>= interpret' stmts . uncurry (define name)
-  Block stmts' ->
-    interpret' stmts' (local env) >> interpret' stmts env
   Fun name params stmts' ->
     let callable args env' =
           let envf = foldr (uncurry define) (local env') (zip params args)
@@ -41,48 +39,45 @@ interpret' (stmt : stmts) env = case stmt of
         else case elseStmt of
           Just stmt' -> interpret' (stmt' : stmts) env'
           Nothing    -> interpret' stmts env'
+  Block stmts' -> do
+    interpret' stmts' (local env) >>= interpret' stmts . dropScope . snd
   While cond stmt' -> while env
    where
-    while env' =
+    while env' = do
       ExceptT (evaluate cond env') >>= \(cond', envc) ->
         if isTruthy cond'
           then case stmt' of
-            Block stmts' -> interpret' stmts' (local envc) >>= while . snd
-            _            -> interpret' [stmt'] (local envc) >>= while . snd
+            Block stmts' -> interpret' stmts' envc >>= while . snd
+            _            -> interpret' [stmt'] envc >>= while . snd
           else interpret' stmts envc
-
---
 
 evaluate :: Expr -> Env -> IO (Either RuntimeError (Literal, Env))
 evaluate (Literal lit) env = return $ Right (lit, env)
 evaluate (Grouping expr) env = evaluate expr env
-evaluate (Variable var) env = case get (fst var) env of
-  Just value -> return $ Right (value, env)
-  Nothing    -> return $ Left $ uncurry (RuntimeError "Undefined var") var
-evaluate (Assignment var expr) env = case get (fst var) env of
-  Just _ ->
-    evaluate expr env >>= \case
-      Left err -> return $ Left err
-      Right (lit, env') -> return $ Right (lit, define (fst var) lit env')
-  Nothing -> return $ Left $ uncurry (RuntimeError "Undefined var") var
-evaluate (Logical op left right) env =
-  visitLogical op left right env
+evaluate (Variable var) env = return $ case get (fst var) env of
+  Just lit -> Right (lit, env)
+  Nothing  -> Left $ uncurry (RuntimeError "Undefined var") var
+evaluate (Assignment var expr) env = do
+  result <- evaluate expr env
+  return $ case result of
+    Left err -> Left err
+    Right (lit, env2) -> case assign (fst var) lit env2 of
+      Just newEnv -> Right (lit, newEnv)
+      Nothing     -> Left $ uncurry (RuntimeError "Undefined var") var
+evaluate (Logical op left right) env = visitLogical op left right env
 evaluate (Unary op right) env = runExceptT $ do
-  (right', env') <- ExceptT $ evaluate right env
-  result <- ExceptT $ return $ visitUnary op right'
-  return (result, env')
+  (r, env') <- ExceptT (evaluate right env)
+  (,env') <$> (ExceptT . return) (visitUnary op r)
 evaluate (Binary op left right) env = runExceptT $ do
-  (left', envl) <- ExceptT $ evaluate left env
-  (right', envr) <- ExceptT $ evaluate right envl
-  result <- ExceptT $ return $ visitBinary op left' right'
-  return (result, envr)
+  (l, envl) <- ExceptT (evaluate left env)
+  (r, envr) <- ExceptT (evaluate right envl)
+  (,envr) <$> (ExceptT . return) (visitBinary op l r)
 evaluate (Call callee args) env = runExceptT $ do
+  let visit (lits, env') arg = first (: lits) <$> ExceptT (evaluate arg env')
+  let fold args' env' = first reverse <$> foldM visit ([], env') args'
   (callee', envc) <- ExceptT (evaluate callee env)
   (args', envf) <- fold args envc
   ExceptT (visitCall callee' args' envf)
- where
-  visit (lits, env') arg = first (: lits) <$> ExceptT (evaluate arg env')
-  fold args' env' = first reverse <$> foldM visit ([], env') args'
 
 --
 

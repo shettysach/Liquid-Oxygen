@@ -1,6 +1,20 @@
-fun add(a, b) {
-    return a + b;
+fun exp(a, n) {
+    var r = 1;
+    var i = 0;
+
+    while (i < n) {
+        r = r * a;
+        i = i + 1;
+    }
+
+    return r;
 }
 
-print add("Hello ", "World");
-print add(1, 2);
+fun for_exp(a, n) {
+    var r = 1;
+    for (var i = 0; i < n; i = i + 1) r = r * a;
+    return r;
+}
+
+print exp(3, 3);
+print for_exp(3, 3);

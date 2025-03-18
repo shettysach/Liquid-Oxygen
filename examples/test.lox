@@ -1,10 +1,22 @@
-var a = "global";
-{
-  fun showA() {
-    print a;
-  }
+var a = "init";
+print a;
 
-  showA();
-  var a = "block";
-  showA();
+{
+    var a = 20;
+    print a;
+
+    a = 15;
+    print a;
 }
+
+print a;
+
+{
+    a = 15;
+    print a;
+
+    var a = 20;
+    print a;
+}
+
+print a;

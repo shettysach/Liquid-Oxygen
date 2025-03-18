@@ -53,6 +53,8 @@ data BinaryOp'
 data LogicalOp' = And | Or
   deriving (Show)
 
+-- Positions for Runtime Error
+
 type Positioned a = (a, (Int, Int))
 
 type Name = Positioned String
@@ -63,6 +65,7 @@ type LogicalOp = Positioned LogicalOp'
 -- Env
 
 data Env = Env (Map String Literal) (Maybe Env)
+  deriving (Show)
 
 -- Traits
 
