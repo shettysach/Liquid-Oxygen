@@ -5,3 +5,10 @@ fun exp(a, n) {
 }
 
 print exp(3, 3);
+
+fun add(a, b) {
+    return a + b;
+}
+
+print add(4,5) == add(6,3);
+print add == add;

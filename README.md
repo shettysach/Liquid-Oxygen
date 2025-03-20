@@ -9,7 +9,7 @@ Learning Haskell and Crafting Interpreters.
 cabal run liquid-oxygen <script>
 ```
 
-### GHC only
+### GHC
 
 #### Build
 
@@ -20,12 +20,13 @@ cabal run liquid-oxygen <script>
 
 - nushell
   ```nushell
-  ghc -o lox src/Main.hs ...(ls src/ | get name | filter {|x| $x != "src/Main.hs"}) -outputdir /tmp -O3
+  ghc -o lox src/Main.hs ...(ls src/ | where name != "src/Main.hs" | get name) -outputdir /tmp -O3
   ```
 
 Be sure to clean `/tmp` later.
 
 #### Run
+
 ```sh
 ./lox <script>
 ```

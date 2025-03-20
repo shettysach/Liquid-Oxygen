@@ -18,6 +18,8 @@ parse = parse' []
   parse' stmts [(T.Eof, _)] = Right (reverse stmts)
   parse' stmts tokens       = declaration tokens *>>= (parse' . (: stmts))
 
+-- Stmts
+
 declaration :: Parse Stmt
 declaration (t : ts) = case fst t of
   T.Var       -> varDeclaration ts
@@ -152,8 +154,6 @@ assignment tokens = Parser.or tokens *>>= assignment'
             _            -> Left (ParseError "Invalid target" t)
   assignment' expr ts = Right (expr, ts)
 
--- Logical
-
 or :: Parse Expr
 or tokens =
   Parser.and tokens *>>= or'
@@ -179,8 +179,6 @@ and tokens =
    where
     recurse op =
       equality ts *>>= (and' . Logical (op, snd t) expr)
-
--- Binary
 
 equality :: Parse Expr
 equality tokens = comparison tokens *>>= equality'
@@ -231,8 +229,6 @@ factor tokens = unary tokens *>>= factor'
    where
     recurse op =
       unary ts *>>= (factor' . Binary (op, snd t) expr)
-
---
 
 unary :: Parse Expr
 unary [] = call []

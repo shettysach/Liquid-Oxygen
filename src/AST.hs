@@ -1,6 +1,6 @@
 module AST where
 
-import Data.Map as Map
+import Data.Map (Map)
 import Error    (RuntimeError)
 
 data Stmt
@@ -19,9 +19,9 @@ data Expr
   | Variable Name
   | Assignment Name Expr
   | Call Expr [Expr]
+  | Logical LogicalOp Expr Expr
   | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
-  | Logical LogicalOp Expr Expr
   | Grouping Expr
   deriving (Show)
 
@@ -31,8 +31,6 @@ data Literal
   | Bool' Bool
   | Function' Callable Int
   | Nil
-
-type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
 data UnaryOp' = Minus' | Bang
   deriving (Show, Eq)
@@ -58,8 +56,11 @@ data LogicalOp' = And | Or
 type Positioned a = (a, (Int, Int))
 
 type Name = Positioned String
+
 type UnaryOp = Positioned UnaryOp'
+
 type BinaryOp = Positioned BinaryOp'
+
 type LogicalOp = Positioned LogicalOp'
 
 -- Env
@@ -67,7 +68,14 @@ type LogicalOp = Positioned LogicalOp'
 data Env = Env (Map String Literal) (Maybe Env)
   deriving (Show)
 
+type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
+
 -- Traits
+
+isTruthy :: Literal -> Bool
+isTruthy (Bool' b) = b
+isTruthy Nil       = False
+isTruthy _         = True
 
 instance Eq Literal where
   (String' l) == (String' r) = l == r
@@ -75,11 +83,6 @@ instance Eq Literal where
   (Bool' l) == (Bool' r)     = l == r
   Nil == Nil                 = True
   _ == _                     = False -- TODO: Function eq
-
-isTruthy :: Literal -> Bool
-isTruthy (Bool' b) = b
-isTruthy Nil       = False
-isTruthy _         = True
 
 instance Show Literal where
   show (String' s)     = s
