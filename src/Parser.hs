@@ -43,8 +43,8 @@ block stmts tokens = declaration tokens *>>= (block . (: stmts))
 
 varDeclaration :: Parse Stmt
 varDeclaration ((T.Identifier name, _) : t : ts)
-  | fst t == T.Equal = expression ts *>>= (statement . A.Var name)
-  | fst t == T.Semicolon = statement (A.Var name $ Literal A.Nil) (t : ts)
+  | fst t == T.Equal = expression ts *>>= (statement . A.Var name . Just)
+  | fst t == T.Semicolon = statement (A.Var name Nothing) (t : ts)
   | otherwise = Left $ ParseError "Expected = after var name" t
 varDeclaration tokens = Left $ ParseError "Expected var name" (head tokens)
 
@@ -110,17 +110,19 @@ for tokens = Left $ ParseError "Expected '(' after 'for'" (head tokens)
 
 -- TODO: Handle kind (method/fn)
 function :: Parse Stmt
-function ((T.Identifier name, _) : t : ts) | fst t == T.LeftParen = do
-  (params, afterParams) <- parameters [] ts
-  when
-    (length params >= 255)
-    (Left $ ParseError ">= 255 params" $ head afterParams)
+function (t0 : t1 : ts)
+  | T.Identifier name <- fst t0
+  , T.LeftParen <- fst t1 = do
+      (params, afterParams) <- parameters [] ts
+      when
+        (length params >= 255)
+        (Left $ ParseError ">= 255 params" $ head afterParams)
 
-  (body, afterBody) <- case afterParams of
-    (t' : ts') | fst t' == T.LeftBrace -> block [] ts'
-    _ -> Left $ ParseError "Expected '{' after params" (head afterParams)
+      (body, afterBody) <- case afterParams of
+        (t' : ts') | fst t' == T.LeftBrace -> block [] ts'
+        _ -> Left $ ParseError "Expected '{' after params" (head afterParams)
 
-  Right (A.Fun name params body, afterBody)
+      Right (A.Fun name params body, afterBody)
 function tokens = Left $ ParseError "Expected identifier" (head tokens)
 
 parameters :: [String] -> Parse [String]
@@ -131,11 +133,11 @@ parameters ps (t : ts)
 parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" (head tokens)
 
 returnStatement :: Parse Stmt
-returnStatement (t : ts) | fst t == T.Semicolon = Right (A.Return (Literal A.Nil), ts)
+returnStatement (t : ts) | fst t == T.Semicolon = Right (A.Return Nothing, ts)
 returnStatement tokens = do
   (expr, after) <- expression tokens
   case after of
-    t : ts | fst t == T.Semicolon -> Right (A.Return expr, ts)
+    t : ts | fst t == T.Semicolon -> Right (A.Return (Just expr), ts)
     _                             -> Left $ ParseError "Expected ';'" (head after)
 
 -- Expr

@@ -1,9 +1,9 @@
 fun add(a, b) {
-    print a + b;
+    return a + b;
 }
 
-add("Hello ", "World");
-
+print add("Hello ", "World");
+print add(add(1, 2), add(2, 3));
 print "";
 
 var c = 0;
@@ -12,4 +12,3 @@ while (c < 10) print c = c + 1;
 print "";
 
 for (var i = 0; i < 10; i = i + 1) print i;
-// print i // Runtime Error

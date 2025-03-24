@@ -5,13 +5,13 @@ import Error    (RuntimeError)
 
 data Stmt
   = Expr Expr
-  | Var String Expr
+  | Var String (Maybe Expr)
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
   | Print Expr
   | Block [Stmt]
   | Fun String [String] [Stmt]
-  | Return Expr
+  | Return (Maybe Expr)
   deriving (Show)
 
 data Expr
@@ -31,6 +31,8 @@ data Literal
   | Bool' Bool
   | Function' Callable Int
   | Nil
+
+type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
 data UnaryOp' = Minus' | Bang
   deriving (Show, Eq)
@@ -66,9 +68,6 @@ type LogicalOp = Positioned LogicalOp'
 -- Env
 
 data Env = Env (Map String Literal) (Maybe Env)
-  deriving (Show)
-
-type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
 -- Traits
 

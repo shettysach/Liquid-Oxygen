@@ -4,6 +4,13 @@ import Token
 
 data ScanError = ScanError String String (Int, Int)
 
+data ParseError = ParseError String Token
+
+data ResolveError = ResolverError String (Int, Int)
+  deriving (Show)
+
+data RuntimeError = RuntimeError String String (Int, Int)
+
 instance Show ScanError where
   show (ScanError message lexeme position) =
     "\n\ESC[31m"
@@ -15,8 +22,6 @@ instance Show ScanError where
       ++ "\nPosition   - "
       ++ show position
 
-data ParseError = ParseError String Token
-
 instance Show ParseError where
   show (ParseError message (token, position)) =
     "\n\ESC[31m"
@@ -27,8 +32,6 @@ instance Show ParseError where
       ++ show token
       ++ "\nPosition    - "
       ++ show position
-
-data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show RuntimeError where
   show (RuntimeError message lexeme position) =

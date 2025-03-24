@@ -5,55 +5,52 @@ import Error     (ScanError (ScanError))
 import Token
 
 scan :: String -> Either ScanError [Token]
-scan source = scanTokens source (1, 1)
+scan source = scan' source (1, 1)
 
-scanTokens :: String -> (Int, Int) -> Either ScanError [Token]
-scanTokens [] pos = Right [(Eof, pos)]
-scanTokens chars@(c : _) pos@(line, col)
+scan' :: String -> (Int, Int) -> Either ScanError [Token]
+scan' [] pos = Right [(Eof, pos)]
+scan' chars@(c : cs) pos@(line, col)
   -- Keywords and identifiers
   | isAlpha c || c == '_' =
       let (lexeme, cs') = span (\x -> isAlphaNum x || x == '_') chars
           token = (scanWord lexeme, pos)
           col' = col + length lexeme
-       in (token :) <$> scanTokens cs' (line, col')
+       in (token :) <$> scan' cs' (line, col')
   -- Numbers
   | isDigit c =
       let (lexeme, cs') = scanNumber chars
           token = (Number' (read lexeme), pos)
           col' = col + length lexeme
-       in (token :) <$> scanTokens cs' (line, col')
-scanTokens (c : cs) pos@(line, col) =
-  case c of
-    -- Strings
-    '"' ->
+       in (token :) <$> scan' cs' (line, col')
+  -- Whitespaces
+  | c `elem` [' ', '\t', '\r'] = scan' cs (line, col + 1)
+  -- Newline
+  | c == '\n' = scan' cs (line + 1, 1)
+  -- Strings
+  | c == '"' =
       let (lexeme, cs1) = span (/= '"') cs
        in case cs1 of
             '"' : cs2 ->
               let token = (String' lexeme, pos)
                   line' = line + length (filter (== '\n') lexeme)
                   col' = col + length lexeme + 2
-               in (token :) <$> scanTokens cs2 (line', col')
+               in (token :) <$> scan' cs2 (line', col')
             _ -> Left $ ScanError "Unterminated string" lexeme pos
-    -- Whitespaces and newline
-    ' ' -> scanTokens cs (line, col + 1)
-    '\t' -> scanTokens cs (line, col + 1)
-    '\r' -> scanTokens cs (line, col + 1)
-    '\n' -> scanTokens cs (line + 1, 1)
-    -- Divison and comments
-    '/' -> case cs of
-      '/' : cs' -> scanTokens (dropWhile (/= '\n') cs') (line, 1)
-      _         -> ((Slash, pos) :) <$> scanTokens cs (line, col + 1)
-    -- Single and double char tokens
-    _ -> case cs of
+  -- Divison and comments
+  | c == '/' = case cs of
+      '/' : cs' -> scan' (dropWhile (/= '\n') cs') (line, 1)
+      _         -> ((Slash, pos) :) <$> scan' cs (line, col + 1)
+  -- Single and double char tokens
+  | otherwise = case cs of
       c' : cs'
         | Just tokenType <- scanDoubleChar c c' ->
             let token = (tokenType, pos)
-             in (token :) <$> scanTokens cs' (line, col + 2)
-      cs'
+             in (token :) <$> scan' cs' (line, col + 2)
+      _
         | Just tokenType <- scanSingleChar c ->
             let token = (tokenType, pos)
-             in (token :) <$> scanTokens cs' (line, col + 1)
-      _ -> Left (ScanError "Unidentified token" [c] pos)
+             in (token :) <$> scan' cs (line, col + 1)
+        | otherwise -> Left (ScanError "Unidentified token" [c] pos)
 
 scanWord :: String -> TokenType
 scanWord lexeme = case lexeme of
