@@ -6,9 +6,6 @@ data ScanError = ScanError String String (Int, Int)
 
 data ParseError = ParseError String Token
 
-data ResolveError = ResolverError String (Int, Int)
-  deriving (Show)
-
 data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show ScanError where

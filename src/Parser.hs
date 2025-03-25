@@ -7,8 +7,6 @@ import AST           as A
 import Error         (ParseError (ParseError))
 import Token         as T
 
-type Parse a = [Token] -> Either ParseError (a, [Token])
-
 (*>>=) :: (Monad m) => m (a, b) -> (a -> b -> m c) -> m c
 x *>>= f = x >>= uncurry f
 
@@ -17,6 +15,8 @@ parse = parse' []
  where
   parse' stmts [(T.Eof, _)] = Right (reverse stmts)
   parse' stmts tokens       = declaration tokens *>>= (parse' . (: stmts))
+
+type Parse a = [Token] -> Either ParseError (a, [Token])
 
 -- Stmts
 

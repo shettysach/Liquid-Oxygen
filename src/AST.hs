@@ -12,7 +12,6 @@ data Stmt
   | Block [Stmt]
   | Fun String [String] [Stmt]
   | Return (Maybe Expr)
-  deriving (Show)
 
 data Expr
   = Literal Literal
@@ -23,7 +22,6 @@ data Expr
   | Unary UnaryOp Expr
   | Binary BinaryOp Expr Expr
   | Grouping Expr
-  deriving (Show)
 
 data Literal
   = Number' Double
@@ -51,7 +49,6 @@ data BinaryOp'
   deriving (Show, Eq)
 
 data LogicalOp' = And | Or
-  deriving (Show)
 
 -- Positions for Runtime Error
 

@@ -26,11 +26,11 @@ interpret' (stmt : stmts) env = case stmt of
   Var name Nothing ->
     interpret' stmts $ define name Nil env
   Return (Just expr) ->
-    ExceptT (evaluate expr env) <&> second Env.drop
+    ExceptT (evaluate expr env) <&> second Env.parent
   Return Nothing ->
-    ExceptT (evaluate (Literal Nil) env) <&> second Env.drop
+    ExceptT (evaluate (Literal Nil) env) <&> second Env.parent
   Block stmts' ->
-    interpret' stmts' (local env) >>= interpret' stmts . Env.drop . snd
+    interpret' stmts' (child env) >>= interpret' stmts . Env.parent . snd
   Print expr -> do
     (lit, env') <- ExceptT (evaluate expr env)
     (liftIO . print) lit
@@ -55,7 +55,7 @@ interpret' (stmt : stmts) env = case stmt of
    where
     fun = Function' callable (length params)
     callable args env' =
-      let envF = foldr (uncurry define) (local env') (zip params args)
+      let envF = foldr (uncurry define) (child env') (zip params args)
        in runExceptT (interpret' stmts' envF)
 
 --
@@ -90,8 +90,7 @@ evaluate (Call callee args) env = runExceptT $ do
 
 --
 
-visitCall ::
-  Literal -> [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
+visitCall :: Literal -> Callable
 visitCall (Function' fun arity) args env
   | length args == arity = fun args env
   | otherwise = return $ Left $ RuntimeError "Arity error" (show arity) (0, 0)
