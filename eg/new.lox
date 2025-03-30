@@ -1,0 +1,20 @@
+  var a = "Global";
+  
+  {
+    fun showA() {
+      print a;
+    }
+      
+    showA();
+    var a = "Block";
+    {
+      showA();
+    }
+
+    var a = showA;
+    var b = showA;
+
+    print a == b;
+
+    a();
+  }

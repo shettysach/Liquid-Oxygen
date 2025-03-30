@@ -6,6 +6,8 @@ data ScanError = ScanError String String (Int, Int)
 
 data ParseError = ParseError String Token
 
+data ResolveError = ResolveError String String (Int, Int)
+
 data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show ScanError where
@@ -28,6 +30,17 @@ instance Show ParseError where
       ++ "\nTokenType   - "
       ++ show token
       ++ "\nPosition    - "
+      ++ show position
+
+instance Show ResolveError where
+  show (ResolveError message lexeme position) =
+    "\n\ESC[31m"
+      ++ "Resolve Error - "
+      ++ "\ESC[0m"
+      ++ message
+      ++ "\nLexeme        - "
+      ++ lexeme
+      ++ "\nPosition      - "
       ++ show position
 
 instance Show RuntimeError where

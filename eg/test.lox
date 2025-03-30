@@ -1,0 +1,23 @@
+var a = "global";
+{
+  fun showA() {
+    print a;
+  }
+
+  showA();
+
+  var a = "block";
+  showA();
+
+  fun hello() {
+    var a = "function";
+    showA();
+  }
+
+  {
+    var a = "nested block";
+    showA();
+  }
+
+  hello();
+}

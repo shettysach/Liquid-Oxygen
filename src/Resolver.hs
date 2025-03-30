@@ -2,98 +2,63 @@
 
 module Resolver where
 
+import Control.Arrow (second)
 import Data.Foldable (foldrM)
 import Data.Map      qualified as Map
 
-import AST
-import Environment   (Distances)
-import Error         (RuntimeError (RuntimeError))
+import Environment
+import Error         (ResolveError (ResolveError))
+import Syntax
 
--- Scope
+type State = (Distances, [Scope])
 
-type Scope = Map.Map String Bool
+resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
+resolve stmts = do
+  (dists, _) <- resolveStmts stmts (Map.empty, [Map.empty])
+  Right (stmts, dists)
 
-begin :: [Scope] -> [Scope]
-begin stack = Map.empty : stack
-
-declare :: String -> [Scope] -> [Scope]
-declare name stack = case stack of
-  scope : scopes -> Map.insert name False scope : scopes
-  []             -> undefined
-
-define :: String -> [Scope] -> [Scope]
-define name stack = case stack of
-  scope : scopes -> Map.insert name True scope : scopes
-  []             -> undefined
-
-decDef :: String -> [Scope] -> [Scope]
-decDef name' = define name' . declare name'
-
--- Resolve
-
-resolve :: [Stmt] -> Either RuntimeError [Stmt]
-resolve stmts = resolveStmts stmts [Map.empty] >> Right stmts
-
-resolveStmts :: [Stmt] -> [Scope] -> Either RuntimeError [Scope]
-resolveStmts [] stack = Right stack
-resolveStmts (stmt : stmts) stack = case stmt of
-  Expr expr ->
-    resolveExpr expr stack >>= resolveStmts stmts
-  Var name (Just expr) ->
-    resolveExpr expr (declare name stack) >>= resolveStmts stmts . define name
-  Var name Nothing ->
-    resolveStmts stmts (decDef name stack)
-  Return (Just expr) ->
-    resolveExpr expr stack >>= resolveStmts stmts
-  Return Nothing ->
-    resolveStmts stmts stack
-  Block stmts' ->
-    resolveStmts stmts' (begin stack) >> resolveStmts stmts stack
-  Print expr ->
-    resolveExpr expr stack >>= resolveStmts stmts
+resolveStmts :: [Stmt] -> State -> Either ResolveError State
+resolveStmts [] state = Right state
+resolveStmts (stmt : stmts) state@(dists, stack) = case stmt of
+  Expr expr -> resolveExpr expr state >>= resolveStmts stmts
+  Var name (Just expr) -> resolveExpr expr (dists, declare name stack) >>= resolveStmts stmts . second (define name)
+  Var name Nothing -> resolveStmts stmts (dists, declareDefine name stack)
+  Return (Just expr) -> resolveExpr expr state >>= resolveStmts stmts
+  Return Nothing -> resolveStmts stmts state
+  Block stmts' -> resolveStmts stmts' (dists, begin stack) >>= resolveStmts stmts . second tail
+  Print expr -> resolveExpr expr (dists, stack) >>= resolveStmts stmts
   If cond thenStmt elseStmt -> do
-    stack' <- resolveExpr cond stack >>= resolveStmts [thenStmt]
+    stack' <- resolveExpr cond state >>= resolveStmts [thenStmt]
     case elseStmt of
       Just stmt' -> resolveStmts [stmt'] stack' >>= resolveStmts stmts
       Nothing    -> resolveStmts stmts stack'
-  While cond stmt' -> do
-    resolveExpr cond stack >>= resolveStmts [stmt'] >>= resolveStmts stmts
-  Fun name params stmts' -> do
-    let stack1 = decDef name stack
-    let stack2 = foldr decDef (begin stack1) params
-    resolveStmts stmts' stack2 >> resolveStmts stmts stack
+  While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] >>= resolveStmts stmts
+  Fun name params stmts' ->
+    let stack1 = declareDefine (fst name) stack
+        stack2 = foldr declareDefine (begin stack1) params
+     in resolveStmts stmts' (dists, stack2) >>= resolveStmts stmts . second tail
 
-resolveExpr :: Expr -> [Scope] -> Either RuntimeError [Scope]
-resolveExpr (Literal _) stack = Right stack
-resolveExpr (Grouping expr) stack =
-  resolveExpr expr stack
-resolveExpr (Variable name) stack =
-  case stack of
-    scope : _
-      | Map.lookup (fst name) scope == Just False ->
-          Left $ uncurry (RuntimeError "Can't read local var in own init") name
-    _ -> do
-      resolveLocal (fst name) stack
-resolveExpr (Assignment name expr) stack =
-  resolveExpr expr stack >>= resolveLocal (fst name)
-resolveExpr (Unary _ right) stack =
-  resolveExpr right stack
-resolveExpr (Binary _ left right) stack =
-  resolveExpr left stack >>= resolveExpr right
-resolveExpr (Logical _ left right) stack =
-  resolveExpr left stack >>= resolveExpr right
-resolveExpr (Call callee args) stack = do
-  stack' <- resolveExpr callee stack
-  foldrM resolveExpr stack' args
+resolveExpr :: Expr -> State -> Either ResolveError State
+resolveExpr (Literal _) state = Right state
+resolveExpr (Grouping expr) state = resolveExpr expr state
+resolveExpr (Variable var) (_, scope : _)
+  | Map.lookup (fst var) scope == Just False =
+      Left $ uncurry (ResolveError "Can't read local var in own init") var
+resolveExpr (Variable var) state = resolveLocal var state
+resolveExpr (Assignment name expr) state = resolveExpr expr state >>= resolveLocal name
+resolveExpr (Unary _ right) state = resolveExpr right state
+resolveExpr (Binary _ left right) state = resolveExpr left state >>= resolveExpr right
+resolveExpr (Logical _ left right) state = resolveExpr left state >>= resolveExpr right
+resolveExpr (Call callee args) state = resolveExpr callee state >>= foldrM resolveExpr `flip` args
 
-resolveLocal :: String -> [Scope] -> Either RuntimeError [Scope]
-resolveLocal name stack = do
-  let dist = distance 0 name stack
-  Left $ RuntimeError "idk" "idk" (0, 0)
-
-distance :: Int -> String -> [Scope] -> Int
-distance dist name stack = case stack of
-  scope : scopes
-    | Map.member name scope -> dist
-    | otherwise -> distance (dist + 1) name scopes
-  _ -> undefined
+resolveLocal :: Name -> State -> Either ResolveError State
+resolveLocal name (dists, stack) =
+  case calculate 0 name stack of
+    Just dist -> Right (Map.insert name dist dists, stack)
+    Nothing   -> Right (dists, stack)
+ where
+  calculate dist name' stack' = case stack' of
+    scope : scopes
+      | Map.member (fst name') scope -> Just dist
+      | otherwise -> calculate (dist + 1) name' scopes
+    [] -> Nothing

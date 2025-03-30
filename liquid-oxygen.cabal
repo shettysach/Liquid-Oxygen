@@ -12,13 +12,13 @@ executable liquid-oxygen
     hs-source-dirs:   src
     main-is:          Main.hs
     other-modules:    
-      AST
       Environment
       Error
       Interpreter
       Parser
       Resolver
       Scanner
+      Syntax
       Token
     build-depends:    
       base ^>=4.18.2.1,

@@ -18,14 +18,14 @@ main =
         >>= endIO interpret
     _ -> putStrLn "Usage: lox <script>"
 
-chainIO :: (Show err) => (a -> Either err ok) -> Maybe a -> IO (Maybe ok)
+chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
 chainIO _ Nothing = return Nothing
 chainIO f (Just x) =
   case f x of
-    Left err -> print err >> return Nothing
-    Right ok -> return (Just ok)
+    Left l  -> print l >> return Nothing
+    Right r -> return (Just r)
 
-endIO :: (Show err) => (a -> IO (Either err ok)) -> Maybe a -> IO ()
+endIO :: (Show l) => (a -> IO (Either l r)) -> Maybe a -> IO ()
 endIO _ Nothing = return ()
 endIO f (Just x) =
   f x >>= \case

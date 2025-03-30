@@ -1,0 +1,22 @@
+var a = "global";
+print a;
+
+{
+    var a = "local";
+    print a;
+
+    a = "local_assign";
+    print a;
+}
+
+print a;
+
+{
+    a = "global_assign";
+    print a;
+
+    var a = "local";
+    print a;
+}
+
+print a;
