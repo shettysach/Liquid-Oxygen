@@ -40,9 +40,9 @@ block (stmts, t : ts) | fst t == T.RightBrace = Right (reverse stmts, ts)
 block (stmts, tokens) = declaration tokens >>= block . first (: stmts)
 
 varDeclaration :: Parser Stmt
-varDeclaration ((T.Identifier name, _) : t : ts)
-  | fst t == T.Equal = expression ts >>= (statement . first (S.Var name . Just))
-  | fst t == T.Semicolon = statement (S.Var name Nothing, t : ts)
+varDeclaration ((T.Identifier name, pos) : t : ts)
+  | fst t == T.Equal = expression ts >>= (statement . first (S.Var (name, pos) . Just))
+  | fst t == T.Semicolon = statement (S.Var (name, pos) Nothing, t : ts)
   | otherwise = Left $ ParseError "Expected = after var name" t
 varDeclaration tokens = Left $ ParseError "Expected var name" (head tokens)
 
@@ -123,11 +123,11 @@ function (t0 : t1 : ts)
       Right (S.Fun (name, pos) params body, afterBody)
 function tokens = Left $ ParseError "Expected identifier" (head tokens)
 
-parameters :: [String] -> Parser [String]
+parameters :: [Name] -> Parser [Name]
 parameters ps (t : ts)
   | T.RightParen <- fst t = Right (reverse ps, ts)
   | T.Comma <- fst t = parameters ps ts
-  | T.Identifier p <- fst t = parameters (p : ps) ts
+  | (T.Identifier param, pos) <- t = parameters ((param, pos) : ps) ts
 parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" (head tokens)
 
 returnStatement :: Parser Stmt

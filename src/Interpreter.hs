@@ -5,7 +5,7 @@ module Interpreter where
 import Control.Arrow              (first, second)
 import Control.Monad              (foldM, void)
 import Control.Monad.IO.Class     (liftIO)
-import Control.Monad.Trans.Except (ExceptT (ExceptT), runExceptT)
+import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT)
 import Data.Functor               ((<&>))
 
 import Environment                as Env
@@ -20,14 +20,15 @@ interpret' ::
 interpret' [] _ env = return (Nil, env)
 interpret' (stmt : stmts) dists env = case stmt of
   Expr expr -> evaluateT expr dists env >>= interpret' stmts dists . snd
-  Var name (Just expr) -> evaluateT expr dists env >>= interpret' stmts dists . uncurry (initialize name)
-  Var name Nothing -> interpret' stmts dists (initialize name Nil env)
+  Var (name, _) (Just expr) -> evaluateT expr dists env >>= interpret' stmts dists . uncurry (initialize name)
+  Var (name, _) Nothing -> interpret' stmts dists (initialize name Nil env)
   Return (Just expr) -> evaluateT expr dists env <&> second Env.parent
   Return Nothing -> evaluateT (Literal Nil) dists env <&> second Env.parent
   Block stmts' -> interpret' stmts' dists (child env) >>= interpret' stmts dists . Env.parent . snd
   Print expr -> do
     (lit, env') <- evaluateT expr dists env
-    (liftIO . print) lit >> interpret' stmts dists env'
+    (liftIO . print) lit
+    interpret' stmts dists env'
   If cond thenStmt elseStmt -> do
     (cond', env') <- evaluateT cond dists env
     if isTruthy cond'
@@ -35,8 +36,7 @@ interpret' (stmt : stmts) dists env = case stmt of
       else case elseStmt of
         Just stmt' -> interpret' (stmt' : stmts) dists env'
         Nothing    -> interpret' stmts dists env'
-  While cond stmt' ->
-    while env
+  While cond stmt' -> while env
    where
     while env' = do
       (cond', envC) <- evaluateT cond dists env'
@@ -45,7 +45,7 @@ interpret' (stmt : stmts) dists env = case stmt of
         else interpret' stmts dists envC
   Fun name params stmts' ->
     let callable args env' =
-          let envF = foldr (uncurry initialize) (child env') (zip params args)
+          let envF = foldr (uncurry initialize) (child env') (zip (map fst params) args)
            in runExceptT (interpret' stmts' dists envF)
         fun = Function' name callable (length params)
      in interpret' stmts dists (initialize (fst name) fun env)
@@ -56,27 +56,22 @@ evaluateT expr dists env = ExceptT (evaluate expr dists env)
 evaluate :: Expr -> Distances -> Env -> IO (Either RuntimeError (Literal, Env))
 evaluate (Literal lit) _ env = return $ Right (lit, env)
 evaluate (Grouping expr) dists env = evaluate expr dists env
-evaluate (Variable var) dists env = return $ do
-  let env' = resolveEnv var dists env
-  case Env.get (fst var) env' of
-    Just lit -> Right (lit, env)
-    Nothing  -> Left $ uncurry (RuntimeError "Undefined var") var
-evaluate (Assignment var expr) dists env = do
-  result <- evaluate expr dists env
-  return $ do
-    (lit, env') <- result
-    case Env.distance var dists of
-      Just dist | Just envA <- Env.assign (fst var) lit dist env' -> Right (lit, envA)
-      _ -> Left $ uncurry (RuntimeError "Undefined var") var
+evaluate (Variable var) dists env =
+  return $ Env.get var (resolveEnv var dists env) >>= Right . (,env)
+evaluate (Assignment var expr) dists env = runExceptT $ do
+  (lit, env') <- evaluateT expr dists env
+  except $ case Map.lookup var dists of
+    Just dist -> Env.assign var lit dist env' >>= Right . (lit,)
+    _         -> Left $ uncurry (RuntimeError "Undefined var") var
 evaluate (Logical op left right) dists env =
   visitLogical op left right dists env
 evaluate (Unary op right) dists env = runExceptT $ do
   (r, envR) <- evaluateT right dists env
-  (ExceptT . return) (visitUnary op r) <&> (,envR)
+  except $ visitUnary op r <&> (,envR)
 evaluate (Binary op left right) dists env = runExceptT $ do
   (l, envL) <- evaluateT left dists env
   (r, envR) <- evaluateT right dists envL
-  (ExceptT . return) (visitBinary op l r) <&> (,envR)
+  except $ visitBinary op l r <&> (,envR)
 evaluate (Call callee args) dists env = runExceptT $ do
   let closure = case callee of
         Variable var -> resolveEnv var dists env
@@ -86,7 +81,7 @@ evaluate (Call callee args) dists env = runExceptT $ do
   callee' <- fst <$> evaluateT callee dists env
   (args', closure') <- first reverse <$> foldM evaluateArg ([], closure) args
   lit <- fst <$> ExceptT (visitCall callee' args' closure')
-  ExceptT . return $ Right (lit, env)
+  except $ Right (lit, env)
 
 visitCall :: Literal -> Callable
 visitCall (Function' name fun arity) args env

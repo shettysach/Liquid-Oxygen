@@ -2,6 +2,7 @@ module Environment where
 
 import Data.Map as Map
 
+import Error    (ResolveError (ResolveError), RuntimeError (RuntimeError))
 import Syntax   (Env (Env), Literal, Name)
 
 -- data Env = Env (Map String Literal) (Maybe Env)
@@ -9,20 +10,21 @@ import Syntax   (Env (Env), Literal, Name)
 global :: Env
 global = Env Map.empty Nothing
 
-get :: String -> Env -> Maybe Literal
-get name (Env scope _) = Map.lookup name scope
+get :: Name -> Env -> Either RuntimeError Literal
+get (var, pos) (Env scope _) = case Map.lookup var scope of
+  Just lit -> Right lit
+  Nothing  -> Left $ RuntimeError "Undefined var" var pos
 
 initialize :: String -> Literal -> Env -> Env
 initialize name value (Env scope prev) = Env (Map.insert name value scope) prev
 
-assign :: String -> Literal -> Int -> Env -> Maybe Env
-assign name value 0 (Env scope prev) =
-  if Map.member name scope
-    then Just (Env (Map.insert name value scope) prev)
-    else Nothing
+assign :: Name -> Literal -> Int -> Env -> Either RuntimeError Env
+assign (var, _) value 0 (Env scope prev)
+  | Map.member var scope =
+      Right $ Env (Map.insert var value scope) prev
 assign name value dist (Env scope (Just prev)) =
   Env scope . Just <$> assign name value (dist - 1) prev
-assign _ _ _ _ = Nothing
+assign (var, pos) _ _ _ = Left $ RuntimeError "Undefined var" var pos
 
 child :: Env -> Env
 child env = Env Map.empty (Just env)
@@ -49,25 +51,31 @@ type Scope = Map.Map String Bool
 begin :: [Scope] -> [Scope]
 begin stack = Map.empty : stack
 
-declare :: String -> [Scope] -> [Scope]
-declare name stack = case stack of
-  scope : scopes -> Map.insert name False scope : scopes
+declare :: Name -> [Scope] -> Either ResolveError [Scope]
+declare (var, pos) stack = case stack of
+  scope : scopes
+    | not (Map.member var scope) ->
+        Right $ Map.insert var False scope : scopes
+    | otherwise -> Left $ ResolveError "Variable already defined" var pos
+  [] -> Right stack
+
+define :: Name -> [Scope] -> [Scope]
+define name stack = case stack of
+  scope : scopes -> Map.insert (fst name) True scope : scopes
   []             -> stack
 
-define :: String -> [Scope] -> [Scope]
-define name stack = case stack of
-  scope : scopes -> Map.insert name True scope : scopes
-  []             -> stack
+declareDefine :: Name -> [Scope] -> Either ResolveError [Scope]
+declareDefine name stack = declare name stack >>= Right . define name
 
 -- Distances
 
 type Distances = Map Name Int
 
-distance :: Name -> Distances -> Maybe Int
-distance = Map.lookup
+getDistance :: Name -> Distances -> Maybe Int
+getDistance = Map.lookup
 
 resolveEnv :: Name -> Distances -> Env -> Env
 resolveEnv name dists env =
-  case distance name dists of
+  case getDistance name dists of
     Just dist -> ancestor dist env
     Nothing   -> progenitor env

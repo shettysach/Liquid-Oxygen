@@ -5,12 +5,12 @@ import Error    (RuntimeError)
 
 data Stmt
   = Expr Expr
-  | Var String (Maybe Expr)
+  | Var Name (Maybe Expr)
   | Print Expr
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
-  | Fun Name [String] [Stmt]
+  | Fun Name [Name] [Stmt]
   | Return (Maybe Expr)
   deriving (Show)
 

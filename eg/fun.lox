@@ -15,3 +15,9 @@ if (add(4,5) == add(6,3)) {
 } else {
     print "Inequal";
 }
+
+fun x(a, b) {
+    print a;
+}
+
+x(10, 10);
