@@ -1,10 +1,10 @@
-fun exp(a, n) {
+fun very_slow_exp(a, n) {
     var r = 1;
     for (var i = 0; i < n; i = i + 1) r = r * a;
     return r;
 }
 
-print exp(3, 3);
+print very_slow_exp(3, 3);
 
 fun add(a, b) {
     return a + b;
@@ -17,7 +17,8 @@ if (add(4,5) == add(6,3)) {
 }
 
 fun x(a, b) {
-    print a;
+    return a + b;
 }
 
-x(10, 10);
+print x(x(5, 5), x(5, 5));
+print x(x("Hello", ", "), x("World", "!"));

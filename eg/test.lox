@@ -12,11 +12,18 @@ var a = "global";
   fun hello() {
     var a = "function";
     showA();
+
+    fun showA() {
+      print a;
+    }
+    showA();
   }
 
   {
-    var a = "nested block";
-    showA();
+    {
+      var a = "nested block";
+      showA();
+    }
   }
 
   hello();

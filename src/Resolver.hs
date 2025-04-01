@@ -36,20 +36,21 @@ resolveStmts (stmt : stmts) state@(dists, stack) = case stmt of
       Nothing    -> resolveStmts stmts
   While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] >>= resolveStmts stmts
   Fun name params stmts' ->
-    let stack1 = define name stack
-     in foldrM declareDefine (begin stack1) (reverse params)
-          >>= resolveStmts stmts' . (dists,)
-          >>= resolveStmts stmts . second tail
+    foldrM declareDefine (begin . define name $ stack) (reverse params)
+      >>= resolveStmts stmts' . (dists,)
+      >>= resolveStmts stmts . second tail
+
+-- NOTE: second tail vs second (const stack)
 
 resolveExpr :: Expr -> State -> Either ResolveError State
-resolveExpr (Literal _) state = Right state
-resolveExpr (Grouping expr) state = resolveExpr expr state
-resolveExpr (Variable name) state = resolveLocal name state
+resolveExpr (Literal _) state            = Right state
+resolveExpr (Grouping expr) state        = resolveExpr expr state
+resolveExpr (Variable name) state        = resolveLocal name state
 resolveExpr (Assignment name expr) state = resolveExpr expr state >>= resolveLocal name
-resolveExpr (Unary _ right) state = resolveExpr right state
-resolveExpr (Binary _ left right) state = resolveExpr left state >>= resolveExpr right
+resolveExpr (Unary _ right) state        = resolveExpr right state
+resolveExpr (Binary _ left right) state  = resolveExpr left state >>= resolveExpr right
 resolveExpr (Logical _ left right) state = resolveExpr left state >>= resolveExpr right
-resolveExpr (Call callee args) state = resolveExpr callee state >>= foldrM resolveExpr `flip` args
+resolveExpr (Call expr args) state       = resolveExpr expr state >>= foldrM resolveExpr `flip` args
 
 resolveLocal :: Name -> State -> Either ResolveError State
 resolveLocal name (_, scope : _)
@@ -59,10 +60,3 @@ resolveLocal name (dists, stack) =
   case calcDistance 0 name stack of
     Just dist -> Right (Map.insert name dist dists, stack)
     Nothing   -> Right (dists, stack)
-
-calcDistance :: Int -> Name -> [Scope] -> Maybe Int
-calcDistance dist name' stack' = case stack' of
-  scope : scopes
-    | Map.member (fst name') scope -> Just dist
-    | otherwise -> calcDistance (dist + 1) name' scopes
-  [] -> Nothing

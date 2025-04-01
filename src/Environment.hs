@@ -71,11 +71,19 @@ declareDefine name stack = declare name stack >>= Right . define name
 
 type Distances = Map Name Int
 
-getDistance :: Name -> Distances -> Maybe Int
-getDistance = Map.lookup
+calcDistance :: Int -> Name -> [Scope] -> Maybe Int
+calcDistance dist name' stack' = case stack' of
+  scope : scopes
+    | Map.member (fst name') scope -> Just dist
+    | otherwise -> calcDistance (dist + 1) name' scopes
+  [] -> Nothing
+
+getDistance :: Name -> Distances -> Either RuntimeError Int
+getDistance name dists = case Map.lookup name dists of
+  Just dist -> Right dist
+  Nothing   -> Left $ uncurry (RuntimeError "Undefined var") name
 
 resolveEnv :: Name -> Distances -> Env -> Env
-resolveEnv name dists env =
-  case getDistance name dists of
-    Just dist -> ancestor dist env
-    Nothing   -> progenitor env
+resolveEnv name dists env = case getDistance name dists of
+  Right dist -> ancestor dist env
+  Left _     -> progenitor env
