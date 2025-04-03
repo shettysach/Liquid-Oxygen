@@ -3,14 +3,14 @@ module Environment where
 import Data.Map as Map
 
 import Error    (ResolveError (ResolveError), RuntimeError (RuntimeError))
-import Syntax   (Env (Env), Literal, Name)
+import Syntax   (Env (Env), Literal, String')
 
 -- data Env = Env (Map String Literal) (Maybe Env)
 
 global :: Env
 global = Env Map.empty Nothing
 
-get :: Name -> Env -> Either RuntimeError Literal
+get :: String' -> Env -> Either RuntimeError Literal
 get (var, pos) (Env scope _) = case Map.lookup var scope of
   Just lit -> Right lit
   Nothing  -> Left $ RuntimeError "Undefined var" var pos
@@ -18,7 +18,7 @@ get (var, pos) (Env scope _) = case Map.lookup var scope of
 initialize :: String -> Literal -> Env -> Env
 initialize name value (Env scope prev) = Env (Map.insert name value scope) prev
 
-assign :: Name -> Literal -> Int -> Env -> Either RuntimeError Env
+assign :: String' -> Literal -> Int -> Env -> Either RuntimeError Env
 assign (var, _) value 0 (Env scope prev)
   | Map.member var scope =
       Right $ Env (Map.insert var value scope) prev
@@ -51,39 +51,39 @@ type Scope = Map.Map String Bool
 begin :: [Scope] -> [Scope]
 begin stack = Map.empty : stack
 
-declare :: Name -> [Scope] -> Either ResolveError [Scope]
+declare :: String' -> [Scope] -> Either ResolveError [Scope]
 declare (var, pos) stack = case stack of
   scope : scopes
     | not (Map.member var scope) ->
         Right $ Map.insert var False scope : scopes
-    | otherwise -> Left $ ResolveError "Variable already defined" var pos
+    | otherwise -> Left $ ResolveError "Var already defined" var pos
   [] -> Right stack
 
-define :: Name -> [Scope] -> [Scope]
+define :: String' -> [Scope] -> [Scope]
 define name stack = case stack of
   scope : scopes -> Map.insert (fst name) True scope : scopes
   []             -> stack
 
-declareDefine :: Name -> [Scope] -> Either ResolveError [Scope]
+declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
 declareDefine name stack = declare name stack >>= Right . define name
 
 -- Distances
 
-type Distances = Map Name Int
+type Distances = Map String' Int
 
-calcDistance :: Int -> Name -> [Scope] -> Maybe Int
+calcDistance :: Int -> String' -> [Scope] -> Maybe Int
 calcDistance dist name' stack' = case stack' of
   scope : scopes
     | Map.member (fst name') scope -> Just dist
     | otherwise -> calcDistance (dist + 1) name' scopes
   [] -> Nothing
 
-getDistance :: Name -> Distances -> Either RuntimeError Int
+getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
   Just dist -> Right dist
   Nothing   -> Left $ uncurry (RuntimeError "Undefined var") name
 
-resolveEnv :: Name -> Distances -> Env -> Env
+resolveEnv :: String' -> Distances -> Env -> Env
 resolveEnv name dists env = case getDistance name dists of
   Right dist -> ancestor dist env
   Left _     -> progenitor env

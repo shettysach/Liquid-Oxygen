@@ -12,44 +12,36 @@ data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show ScanError where
   show (ScanError message lexeme position) =
-    "\n\ESC[31m"
-      ++ "Scan Error - "
-      ++ "\ESC[0m"
+    "\nSCAN ERROR : "
       ++ message
-      ++ "\nLexeme     - "
+      ++ "\nLexeme     : "
       ++ lexeme
-      ++ "\nPosition   - "
+      ++ "\nPosition   : "
       ++ show position
 
 instance Show ParseError where
   show (ParseError message (token, position)) =
-    "\n\ESC[31m"
-      ++ "Parse Error - "
-      ++ "\ESC[0m"
+    "\nPARSE ERROR : "
       ++ message
-      ++ "\nTokenType   - "
+      ++ "\nTokenType   : "
       ++ show token
-      ++ "\nPosition    - "
+      ++ "\nPosition    : "
       ++ show position
 
 instance Show ResolveError where
   show (ResolveError message lexeme position) =
-    "\n\ESC[31m"
-      ++ "Resolve Error - "
-      ++ "\ESC[0m"
+    "\nRESOLVE ERROR : "
       ++ message
-      ++ "\nLexeme        - "
+      ++ "\nLexeme        : "
       ++ lexeme
-      ++ "\nPosition      - "
+      ++ "\nPosition      : "
       ++ show position
 
 instance Show RuntimeError where
   show (RuntimeError message lexeme position) =
-    "\n\ESC[31m"
-      ++ "Runtime Error - "
-      ++ "\ESC[0m"
+    "\nRUNTIME ERROR : "
       ++ message
-      ++ "\nLexeme        - "
+      ++ "\nLexeme        : "
       ++ lexeme
-      ++ "\nPosition      - "
+      ++ "\nPosition      : "
       ++ show position

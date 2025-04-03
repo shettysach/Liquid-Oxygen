@@ -19,7 +19,7 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          name = "haskell-dev";
+          name = "cabal";
           buildInputs = with pkgs; [
             ghc
             cabal-install

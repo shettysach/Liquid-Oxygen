@@ -5,23 +5,27 @@ import Error    (RuntimeError)
 
 data Stmt
   = Expr Expr
-  | Var Name (Maybe Expr)
+  | Var String' (Maybe Expr)
   | Print Expr
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
-  | Fun Name [Name] [Stmt]
-  | Return (Maybe Expr)
+  | Function String' [String'] [Stmt] Kind
+  | Class String' [Stmt]
+  | Return (Maybe' Expr)
+  deriving (Show)
+
+data Kind = F | M
   deriving (Show)
 
 data Expr
   = Literal Literal
-  | Variable Name
-  | Assignment Name Expr
-  | Logical LogicalOp Expr Expr
-  | Unary UnaryOp Expr
-  | Binary BinaryOp Expr Expr
-  | Call Expr [Expr]
+  | Variable String'
+  | Assignment String' Expr
+  | Unary UnaryOp' Expr
+  | Binary BinaryOp' Expr Expr
+  | Logical LogicalOp' Expr Expr
+  | Call Expr' [Expr]
   | Grouping Expr
   deriving (Show)
 
@@ -29,15 +33,16 @@ data Literal
   = Number' Double
   | String' String
   | Bool' Bool
-  | Function' Name Callable Int
+  | Function' String' Callable Int
+  | Class' String'
+  | Instance' String' (Map String Literal)
   | Nil
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
-data UnaryOp' = Minus' | Bang
-  deriving (Show, Eq)
+data UnaryOp = Minus' | Bang
 
-data BinaryOp'
+data BinaryOp
   = Slash
   | Star
   | Plus
@@ -48,22 +53,21 @@ data BinaryOp'
   | LessEqual
   | EqualEqual
   | BangEqual
-  deriving (Show, Eq)
 
-data LogicalOp' = And | Or
-  deriving (Show)
+data LogicalOp = And | Or
 
 -- Positions for Runtime Error
 
 type Positioned a = (a, (Int, Int))
 
-type Name = Positioned String
-
-type UnaryOp = Positioned UnaryOp'
-
-type BinaryOp = Positioned BinaryOp'
-
-type LogicalOp = Positioned LogicalOp'
+type Expr' = Positioned Expr
+type String' = Positioned String
+type Number' = Positioned Double
+type Bool' = Positioned Bool
+type Maybe' a = Positioned (Maybe a)
+type UnaryOp' = Positioned UnaryOp
+type BinaryOp' = Positioned BinaryOp
+type LogicalOp' = Positioned LogicalOp
 
 -- Env
 
@@ -91,4 +95,26 @@ instance Show Literal where
   show (Bool' True)      = "true"
   show (Bool' False)     = "false"
   show Nil               = "nil"
-  show (Function' f _ _) = "<fun " ++ fst f ++ ">"
+  show (Function' f _ _) = "<fn " ++ fst f ++ ">"
+  show (Class' c)        = "<class " ++ fst c ++ ">"
+  show (Instance' i _)   = fst i ++ " instance"
+
+instance Show UnaryOp where
+  show Minus' = "-"
+  show Bang   = "!"
+
+instance Show BinaryOp where
+  show Slash        = "/"
+  show Star         = "*"
+  show Plus         = "+"
+  show Minus        = "-"
+  show Greater      = ">"
+  show GreaterEqual = ">="
+  show Less         = "<"
+  show LessEqual    = "<="
+  show EqualEqual   = "=="
+  show BangEqual    = "!="
+
+instance Show LogicalOp where
+  show And = "and"
+  show Or  = "or"

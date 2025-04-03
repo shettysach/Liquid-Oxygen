@@ -20,5 +20,11 @@ fun x(a, b) {
     return a + b;
 }
 
-print x(x(5, 5), x(5, 5));
-print x(x("Hello", ", "), x("World", "!"));
+print x(
+    x(5, 5), 
+    x(5, 5)
+);
+print x(
+    x("Hello", ", "), 
+    x("World", "!")
+);

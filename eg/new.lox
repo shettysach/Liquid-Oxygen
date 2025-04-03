@@ -1,21 +1,5 @@
-{
-  var a = "Global";
-  
-  {
-    fun showA() {
-      print a;
-    }
-      
-    showA();
-    var a = "Block";
-
-    {
-      showA();
-    }
-
-    var c = showA;
-    var b = showA;
-
-    print a == b;
-  }
-}
+class X {}
+var a = X();
+print X;
+print a;
+10();

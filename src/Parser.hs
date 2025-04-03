@@ -10,7 +10,7 @@ import Token         as T
 parse :: [Token] -> Either ParseError [Stmt]
 parse tokens = parse' ([], tokens)
  where
-  parse' (stmts, [t]) | fst t == T.Eof = Right (reverse stmts)
+  parse' (stmts, [t]) | T.Eof <- fst t = Right (reverse stmts)
   parse' (stmts, tokens') = declaration tokens' >>= (parse' . first (: stmts))
 
 type Parse a = (a, [Token]) -> Either ParseError (a, [Token])
@@ -21,78 +21,79 @@ type Parser a = [Token] -> Either ParseError (a, [Token])
 declaration :: Parser Stmt
 declaration (t : ts) = case fst t of
   T.Var       -> varDeclaration ts
-  T.Print     -> expression ts >>= statement . first S.Print
-  T.Fun       -> function ts
-  T.Return    -> returnStatement ts
+  T.Fun       -> function F ts
+  T.Class     -> classDeclaration ts
+  T.Return    -> returnStatement (snd t) ts
   T.LeftBrace -> first S.Block <$> block ([], ts)
   T.If        -> ifStatement ts
   T.While     -> while ts
   T.For       -> for ts
+  T.Print     -> expression ts >>= statement . first S.Print
   _           -> expression (t : ts) >>= statement . first S.Expr
 declaration tokens = expression tokens >>= statement . first S.Expr
 
 statement :: Parse Stmt
-statement (stmt, t : ts) | fst t == T.Semicolon = Right (stmt, ts)
-statement (_, tokens) = Left $ ParseError "Expected ';'" (head tokens)
+statement (stmt, t : ts) | T.Semicolon <- fst t = Right (stmt, ts)
+statement (_, tokens) = Left $ ParseError "Expected ';'" $ head tokens
 
 block :: Parse [Stmt]
-block (stmts, t : ts) | fst t == T.RightBrace = Right (reverse stmts, ts)
+block (stmts, t : ts) | T.RightBrace <- fst t = Right (reverse stmts, ts)
 block (stmts, tokens) = declaration tokens >>= block . first (: stmts)
 
 varDeclaration :: Parser Stmt
 varDeclaration ((T.Identifier name, pos) : t : ts)
-  | fst t == T.Equal = expression ts >>= (statement . first (S.Var (name, pos) . Just))
-  | fst t == T.Semicolon = statement (S.Var (name, pos) Nothing, t : ts)
+  | T.Equal <- fst t = expression ts >>= statement . first (S.Var (name, pos) . Just)
+  | T.Semicolon <- fst t = statement (S.Var (name, pos) Nothing, t : ts)
   | otherwise = Left $ ParseError "Expected = after var name" t
-varDeclaration tokens = Left $ ParseError "Expected var name" (head tokens)
+varDeclaration tokens = Left $ ParseError "Expected var name" $ head tokens
 
 ifStatement :: Parser Stmt
-ifStatement (t : ts) | fst t == T.LeftParen = do
+ifStatement (t : ts) | T.LeftParen <- fst t = do
   (condition, afterCondn) <- expression ts
   (thenBranch, afterThen) <- case afterCondn of
-    t' : ts' | fst t' == T.RightParen -> declaration ts'
-    _ -> Left $ ParseError "Expected ')' after if condition" (head afterCondn)
+    t' : ts' | T.RightParen <- fst t' -> declaration ts'
+    _ -> Left $ ParseError "Expected ')' after if condition" $ head afterCondn
   (elseBranch, afterElse) <- case afterThen of
-    t' : ts' | fst t' == T.Else -> first Just <$> declaration ts'
+    t' : ts' | T.Else <- fst t' -> first Just <$> declaration ts'
     _                           -> Right (Nothing, afterThen)
   Right (S.If condition thenBranch elseBranch, afterElse)
-ifStatement tokens = Left $ ParseError "Expected '(' after 'if'" (head tokens)
+ifStatement tokens = Left $ ParseError "Expected '(' after 'if'" $ head tokens
 
 while :: Parser Stmt
-while (t : ts) | fst t == T.LeftParen = do
+while (t : ts) | T.LeftParen <- fst t = do
   (condition, afterCondn) <- expression ts
   case afterCondn of
-    t' : ts' | fst t' == T.RightParen -> first (S.While condition) <$> declaration ts'
-    _ -> Left $ ParseError "Expected ')' after while condition" (head ts)
-while tokens = Left $ ParseError "Expected '(' after 'while'" (head tokens)
+    t' : ts' | T.RightParen <- fst t' -> first (S.While condition) <$> declaration ts'
+    _ -> Left $ ParseError "Expected ')' after while condition" $ head ts
+while tokens = Left $ ParseError "Expected '(' after 'while'" $ head tokens
 
 for :: Parser Stmt
-for (t : ts) | fst t == T.LeftParen = do
+for (t : ts) | T.LeftParen <- fst t = do
   (initializer, afterInit) <- case ts of
     t1 : ts1
-      | fst t1 == T.Semicolon -> Right (Nothing, ts1)
-      | fst t1 == T.Var -> first Just <$> varDeclaration ts1
+      | T.Semicolon <- fst t1 -> Right (Nothing, ts1)
+      | T.Var <- fst t1 -> first Just <$> varDeclaration ts1
     _ -> do
       (expr, after) <- expression ts
       case after of
-        t2 : ts2 | fst t2 == T.Semicolon -> Right (Just (Expr expr), ts2)
-        _ -> Left $ ParseError "Expected ';' after loop initializer" (head after)
+        t2 : ts2 | T.Semicolon <- fst t2 -> Right (Just (Expr expr), ts2)
+        _ -> Left $ ParseError "Expected ';' after loop initializer" $ head after
 
   (condition, afterCondn) <- case afterInit of
-    t1 : ts1 | fst t1 == T.Semicolon -> Right (Literal (Bool' True), ts1)
+    t1 : ts1 | T.Semicolon <- fst t1 -> Right (Literal (Bool' True), ts1)
     _ -> do
       (expr, after) <- expression afterInit
       case after of
-        t2 : ts2 | fst t2 == T.Semicolon -> Right (expr, ts2)
-        _ -> Left $ ParseError "Expected ';' after loop condition" (head after)
+        t2 : ts2 | T.Semicolon <- fst t2 -> Right (expr, ts2)
+        _ -> Left $ ParseError "Expected ';' after loop condition" $ head after
 
   (increment, afterInc) <- case afterCondn of
-    t1 : ts1 | fst t1 == T.RightParen -> Right (Nothing, ts1)
+    t1 : ts1 | T.RightParen <- fst t1 -> Right (Nothing, ts1)
     _ -> do
       (expr, after) <- expression afterCondn
       case after of
-        t2 : ts2 | fst t2 == T.RightParen -> Right (Just expr, ts2)
-        _ -> Left $ ParseError "Expected ')' after increment" (head after)
+        t2 : ts2 | T.RightParen <- fst t2 -> Right (Just expr, ts2)
+        _ -> Left $ ParseError "Expected ')' after increment" $ head after
 
   (stmt, afterStmt) <- declaration afterInc
 
@@ -104,11 +105,11 @@ for (t : ts) | fst t == T.LeftParen = do
         Nothing    -> stmt'
         Just init' -> Block [init', stmt']
   Right (loop, afterStmt)
-for tokens = Left $ ParseError "Expected '(' after 'for'" (head tokens)
+for tokens = Left $ ParseError "Expected '(' after 'for'" $ head tokens
 
 -- TODO: Handle kind (method/fn)
-function :: Parser Stmt
-function (t0 : t1 : ts)
+function :: Kind -> Parser Stmt
+function kind (t0 : t1 : ts)
   | (T.Identifier name, pos) <- t0
   , T.LeftParen <- fst t1 = do
       (params, afterParams) <- parameters [] ts
@@ -117,26 +118,38 @@ function (t0 : t1 : ts)
         (Left $ ParseError ">= 255 params" $ head afterParams)
 
       (body, afterBody) <- case afterParams of
-        (t' : ts') | fst t' == T.LeftBrace -> block ([], ts')
+        (t' : ts') | T.LeftBrace <- fst t' -> block ([], ts')
         _ -> Left $ ParseError "Expected '{' after params" (head afterParams)
 
-      Right (S.Fun (name, pos) params body, afterBody)
-function tokens = Left $ ParseError "Expected identifier" (head tokens)
+      Right (S.Function (name, pos) params body kind, afterBody)
+function _ tokens = Left $ ParseError "Expected identifier" $ head tokens
 
-parameters :: [Name] -> Parser [Name]
+parameters :: [String'] -> Parser [String']
 parameters ps (t : ts)
   | T.RightParen <- fst t = Right (reverse ps, ts)
   | T.Comma <- fst t = parameters ps ts
   | (T.Identifier param, pos) <- t = parameters ((param, pos) : ps) ts
-parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" (head tokens)
+parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" $ head tokens
 
-returnStatement :: Parser Stmt
-returnStatement (t : ts) | fst t == T.Semicolon = Right (S.Return Nothing, ts)
-returnStatement tokens = do
+returnStatement :: (Int, Int) -> Parser Stmt
+returnStatement pos (t : ts) | T.Semicolon <- fst t = Right (S.Return (Nothing, pos), ts)
+returnStatement pos tokens = do
   (expr, after) <- expression tokens
   case after of
-    t : ts | fst t == T.Semicolon -> Right (S.Return (Just expr), ts)
-    _                             -> Left $ ParseError "Expected ';'" (head after)
+    t : ts | T.Semicolon <- fst t -> Right (S.Return (Just expr, pos), ts)
+    _                             -> Left $ ParseError "Expected ';'" $ head after
+
+classDeclaration :: Parser Stmt
+classDeclaration (t : ts) | T.Identifier name <- fst t = do
+  (methods, afterMethods) <- case ts of
+    t1 : ts1 | T.LeftBrace <- fst t1 -> method ([], ts1)
+    _                                -> Left $ ParseError "Expected '{' before class body" (head ts)
+  Right (S.Class (name, snd t) methods, afterMethods)
+classDeclaration tokens = Left $ ParseError "Expected class name" $ head tokens
+
+method :: Parse [Stmt]
+method (mthds, t : ts) | T.RightBrace <- fst t = Right (reverse mthds, ts)
+method (mthds, tokens) = function M tokens >>= method . first (: mthds)
 
 -- Expr
 
@@ -147,11 +160,11 @@ assignment :: Parser Expr
 assignment tokens = Parser.or tokens >>= assignment'
  where
   assignment' (expr, t : ts)
-    | fst t == T.Equal =
-        assignment ts >>= \(value, ts') ->
-          case expr of
-            Variable var -> Right (S.Assignment var value, ts')
-            _            -> Left (ParseError "Invalid target" t)
+    | T.Equal <- fst t = do
+        (value, ts') <- assignment ts
+        case expr of
+          Variable var -> Right (S.Assignment var value, ts')
+          _            -> Left (ParseError "Invalid target" t)
   assignment' (expr, ts) = Right (expr, ts)
 
 or :: Parser Expr
@@ -246,20 +259,21 @@ call tokens = primary tokens >>= call'
     T.LeftParen -> finish expr ts >>= call'
     _           -> Right (expr, t : ts)
 
-  finish expr' tokens' = do
+  pos = snd $ head tokens
+  finish expr tokens' = do
     (args, rest) <- arguments tokens'
     when
       (length args >= 255)
       (Left $ ParseError ">= 255 args" $ head rest)
     case rest of
-      t' : ts' | fst t' == T.RightParen -> Right (Call expr' args, ts')
+      t' : ts' | T.RightParen <- fst t' -> Right (Call (expr, pos) args, ts')
       _                                 -> Left $ ParseError "Expected ')' after args" (head rest)
 
-  arguments (t' : ts') | fst t' == T.RightParen = Right ([], t' : ts')
+  arguments (t' : ts') | T.RightParen <- fst t' = Right ([], t' : ts')
   arguments tokens' = do
     (arg, rest) <- expression tokens'
     case rest of
-      (t' : ts') | fst t' == T.Comma -> first (arg :) <$> arguments ts'
+      (t' : ts') | T.Comma <- fst t' -> first (arg :) <$> arguments ts'
       _                              -> Right ([arg], rest)
 
 primary :: Parser Expr
@@ -273,7 +287,7 @@ primary (t : ts) = case fst t of
   T.LeftParen -> do
     (expr, rest) <- expression ts
     case rest of
-      t' : ts' | fst t' == T.RightParen -> Right (Grouping expr, ts')
+      t' : ts' | T.RightParen <- fst t' -> Right (Grouping expr, ts')
       _                                 -> Left $ ParseError "Expected ')' after expr" t
   _ -> Left $ ParseError "Expected expr" t
-primary tokens = Left $ ParseError "Expected expr" (head tokens)
+primary tokens = Left $ ParseError "Expected expr" $ head tokens
