@@ -27,6 +27,8 @@ data Expr
   | Logical LogicalOp' Expr Expr
   | Call Expr' [Expr]
   | Grouping Expr
+  | Get Expr String'
+  | Set Expr String' Expr
   deriving (Show)
 
 data Literal

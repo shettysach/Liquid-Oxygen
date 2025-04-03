@@ -163,8 +163,9 @@ assignment tokens = Parser.or tokens >>= assignment'
     | T.Equal <- fst t = do
         (value, ts') <- assignment ts
         case expr of
-          Variable var -> Right (S.Assignment var value, ts')
-          _            -> Left (ParseError "Invalid target" t)
+          Variable var   -> Right (S.Assignment var value, ts')
+          Get expr' prop -> Right (S.Set expr' prop value, ts')
+          _              -> Left (ParseError "Invalid target" t)
   assignment' (expr, ts) = Right (expr, ts)
 
 or :: Parser Expr
@@ -257,24 +258,30 @@ call tokens = primary tokens >>= call'
   call' (expr, []) = Right (expr, [])
   call' (expr, t : ts) = case fst t of
     T.LeftParen -> finish expr ts >>= call'
-    _           -> Right (expr, t : ts)
+    T.Dot -> case ts of
+      t' : ts' | T.Identifier prop <- fst t' -> Right (Get expr (prop, snd t'), ts')
+      _ -> Left $ ParseError "Expect property name after '.'" (head ts)
+    _ -> Right (expr, t : ts)
 
-  pos = snd $ head tokens
   finish expr tokens' = do
     (args, rest) <- arguments tokens'
     when
       (length args >= 255)
       (Left $ ParseError ">= 255 args" $ head rest)
     case rest of
-      t' : ts' | T.RightParen <- fst t' -> Right (Call (expr, pos) args, ts')
-      _                                 -> Left $ ParseError "Expected ')' after args" (head rest)
+      t' : ts'
+        | T.RightParen <- fst t' ->
+            Right (Call (expr, (snd . head) tokens) args, ts')
+      _ -> Left $ ParseError "Expected ')' after args" (head rest)
 
   arguments (t' : ts') | T.RightParen <- fst t' = Right ([], t' : ts')
   arguments tokens' = do
     (arg, rest) <- expression tokens'
     case rest of
-      (t' : ts') | T.Comma <- fst t' -> first (arg :) <$> arguments ts'
-      _                              -> Right ([arg], rest)
+      (t' : ts')
+        | T.Comma <- fst t' ->
+            first (arg :) <$> arguments ts'
+      _ -> Right ([arg], rest)
 
 primary :: Parser Expr
 primary (t : ts) = case fst t of

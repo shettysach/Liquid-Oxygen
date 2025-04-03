@@ -54,6 +54,8 @@ resolveExpr (Unary _ right) state        = resolveExpr right state
 resolveExpr (Binary _ left right) state  = resolveExpr left state >>= resolveExpr right
 resolveExpr (Logical _ left right) state = resolveExpr left state >>= resolveExpr right
 resolveExpr (Call (expr, _) args) state  = resolveExpr expr state >>= foldrM resolveExpr `flip` args
+resolveExpr (Get expr _) state           = resolveExpr expr state
+resolveExpr (Set expr _ expr') state     = resolveExpr expr state >>= resolveExpr expr'
 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name (_, scope : _)

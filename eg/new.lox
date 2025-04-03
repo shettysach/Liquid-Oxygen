@@ -2,4 +2,6 @@ class X {}
 var a = X();
 print X;
 print a;
-10();
+
+a.def = "hello";
+print a.def;

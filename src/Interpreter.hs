@@ -72,7 +72,8 @@ evaluate (Binary op left right) dists env = do
   (l, envL) <- evaluate left dists env
   (r, envR) <- evaluate right dists envL
   except $ visitBinary op l r <&> (,envR)
-evaluate (Logical op left right) dists env = visitLogical op left right dists env
+evaluate (Logical op left right) dists env =
+  visitLogical op left right dists env
 evaluate (Call callee args) dists env = do
   callee' <- fst <$> evaluate (fst callee) dists env
   (args', closure') <- foldArgs args closure
@@ -86,6 +87,27 @@ evaluate (Call callee args) dists env = do
     first (: lits) <$> evaluate arg dists env'
   foldArgs args' closure' =
     first reverse <$> foldM evalArg ([], closure') args'
+evaluate (Get expr prop) dists env = do
+  (inst, envI) <- evaluate expr dists env
+  except $ case inst of
+    Instance' _ props -> case Map.lookup (fst prop) props of
+      Just lit -> Right (lit, envI)
+      Nothing  -> Left $ uncurry (RuntimeError "Undefined prop") prop
+    _ -> Left $ uncurry (RuntimeError "Only instances have props") prop
+evaluate (Set expr prop expr') dists env = do
+  (inst, envI) <- evaluate expr dists env
+  (lit, envL) <- evaluate expr' dists envI
+  except $ case inst of
+    Instance' name props -> do
+      let props' = Map.insert (fst prop) lit props
+      let inst' = Instance' name props'
+      case expr of
+        Variable var ->
+          Env.getDistance var dists
+            >>= Env.assign var inst' `flip` envL
+            >>= Right . (inst',)
+        _ -> Right (inst', envL)
+    _ -> Left $ uncurry (RuntimeError "Only instances have props") prop
 
 visitCall :: (Int, Int) -> Literal -> Callable
 visitCall _ (Function' name fun arity) args env
