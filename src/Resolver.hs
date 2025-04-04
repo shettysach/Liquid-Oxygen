@@ -28,7 +28,7 @@ resolveStmts (stmt : stmts) ftype state@(dists, stack) = case stmt of
       >>= resolveExpr expr . (dists,)
       >>= resolveStmts stmts ftype . second (define name)
   Var name Nothing -> declareDefine name stack >>= resolveStmts stmts ftype . (dists,)
-  Return expr | None <- ftype -> Left $ ResolveError "Top level return" "return" (snd expr)
+  Return expr | None <- ftype -> Left $ ResolveError "Top level return" "return" $ snd expr
   Return expr -> case fst expr of
     Just expr' -> resolveExpr expr' state >>= resolveStmts stmts ftype
     Nothing    -> resolveStmts stmts ftype state
@@ -41,13 +41,13 @@ resolveStmts (stmt : stmts) ftype state@(dists, stack) = case stmt of
   While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] ftype >>= resolveStmts stmts ftype
   Function{} -> resolveFunctions stmts Ftype stmt state
   Class name methods ->
-    declareDefine name stack
-      >>= (foldrM (resolveFunctions methods MType) `flip` methods) . (dists,)
-      >>= resolveStmts stmts ftype
+    declareDefine name (define ("this", snd name) stack)
+      >>= (foldrM (resolveFunctions methods MType) `flip` methods) . (dists,) . begin
+      >>= resolveStmts stmts ftype . second tail
 
 resolveFunctions :: [Stmt] -> FunctionType -> Stmt -> State -> Either ResolveError State
 resolveFunctions stmts ftype (Function name params stmts' _) (dists, stack) =
-  foldrM declareDefine (begin $ define name stack) (reverse params)
+  foldrM declareDefine (begin $ define name stack) params
     >>= resolveStmts stmts' ftype . (dists,)
     >>= resolveStmts stmts None . second tail
 resolveFunctions _ _ _ _ = undefined
@@ -63,6 +63,9 @@ resolveExpr (Logical _ left right) state = resolveExpr left state >>= resolveExp
 resolveExpr (Call (expr, _) args) state  = resolveExpr expr state >>= foldrM resolveExpr `flip` args
 resolveExpr (Get expr _) state           = resolveExpr expr state
 resolveExpr (Set expr _ expr') state     = resolveExpr expr state >>= resolveExpr expr'
+resolveExpr (This pos) state             = resolveLocal ("this", pos) state
+
+-- resolveExpr (This pos) state             = resolveLocal
 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name (_, scope : _)

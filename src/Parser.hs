@@ -125,7 +125,7 @@ function _ tokens = Left $ ParseError "Expected identifier" $ head tokens
 
 parameters :: [String'] -> Parser [String']
 parameters ps (t : ts)
-  | T.RightParen <- fst t = Right (reverse ps, ts)
+  | T.RightParen <- fst t = Right (ps, ts)
   | T.Comma <- fst t = parameters ps ts
   | (T.Identifier param, pos) <- t = parameters ((param, pos) : ps) ts
 parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" $ head tokens
@@ -172,23 +172,20 @@ or tokens =
   Parser.and tokens >>= or'
  where
   or' (expr, []) = Right (expr, [])
-  or' (expr, t : ts) =
-    case fst t of
-      T.Or -> loop S.Or
-      _    -> Right (expr, t : ts)
+  or' (expr, t : ts) = case fst t of
+    T.Or -> loop S.Or
+    _    -> Right (expr, t : ts)
    where
-    loop op =
-      Parser.and ts >>= or' . first (Logical (op, snd t) expr)
+    loop op = Parser.and ts >>= or' . first (Logical (op, snd t) expr)
 
 and :: Parser Expr
 and tokens =
   equality tokens >>= and'
  where
   and' (expr, []) = Right (expr, [])
-  and' (expr, t : ts) =
-    case fst t of
-      T.And -> loop S.And
-      _     -> Right (expr, t : ts)
+  and' (expr, t : ts) = case fst t of
+    T.And -> loop S.And
+    _     -> Right (expr, t : ts)
    where
     loop op =
       equality ts >>= and' . first (Logical (op, snd t) expr)
@@ -202,8 +199,7 @@ equality tokens = comparison tokens >>= equality'
     T.EqualEqual -> loop S.EqualEqual
     _            -> Right (expr, t : ts)
    where
-    loop op =
-      comparison ts >>= equality' . first (Binary (op, snd t) expr)
+    loop op = comparison ts >>= equality' . first (Binary (op, snd t) expr)
 
 comparison :: Parser Expr
 comparison tokens = term tokens >>= comparison'
@@ -216,8 +212,7 @@ comparison tokens = term tokens >>= comparison'
     T.LessEqual    -> loop S.LessEqual
     _              -> Right (expr, t : ts)
    where
-    loop op =
-      term ts >>= comparison' . first (Binary (op, snd t) expr)
+    loop op = term ts >>= comparison' . first (Binary (op, snd t) expr)
 
 term :: Parser Expr
 term tokens = factor tokens >>= term'
@@ -228,8 +223,7 @@ term tokens = factor tokens >>= term'
     T.Plus  -> loop S.Plus
     _       -> Right (expr, t : ts)
    where
-    loop op =
-      factor ts >>= term' . first (Binary (op, snd t) expr)
+    loop op = factor ts >>= term' . first (Binary (op, snd t) expr)
 
 factor :: Parser Expr
 factor tokens = unary tokens >>= factor'
@@ -240,16 +234,14 @@ factor tokens = unary tokens >>= factor'
     T.Star  -> loop S.Star
     _       -> Right (expr, t : ts)
    where
-    loop op =
-      unary ts >>= factor' . first (Binary (op, snd t) expr)
+    loop op = unary ts >>= factor' . first (Binary (op, snd t) expr)
 
 unary :: Parser Expr
 unary [] = call []
-unary (t : ts) =
-  case fst t of
-    T.Bang  -> (first . Unary) (S.Bang, snd t) <$> unary ts
-    T.Minus -> (first . Unary) (S.Minus', snd t) <$> unary ts
-    _       -> call (t : ts)
+unary (t : ts) = case fst t of
+  T.Bang  -> (first . Unary) (S.Bang, snd t) <$> unary ts
+  T.Minus -> (first . Unary) (S.Minus', snd t) <$> unary ts
+  _       -> call (t : ts)
 
 call :: Parser Expr
 call tokens = primary tokens >>= call'
@@ -259,7 +251,7 @@ call tokens = primary tokens >>= call'
     T.LeftParen -> finish expr ts >>= call'
     T.Dot -> case ts of
       t' : ts' | T.Identifier prop <- fst t' -> call' (Get expr (prop, snd t'), ts')
-      _ -> Left $ ParseError "Expect property name after '.'" (head ts)
+      _ -> Left $ ParseError "Expected prop/method name after '.'" (head ts)
     _ -> Right (expr, t : ts)
 
   finish expr tokens' = do
@@ -286,6 +278,7 @@ primary (t : ts) = case fst t of
   T.Number' n -> Right (Literal $ S.Number' n, ts)
   T.String' s -> Right (Literal $ S.String' s, ts)
   T.Identifier i -> Right (Variable (i, snd t), ts)
+  T.This -> Right (S.This (snd t), ts)
   T.LeftParen -> do
     (expr, rest) <- expression ts
     case rest of

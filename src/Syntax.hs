@@ -11,8 +11,8 @@ data Stmt
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
   | Function String' [String'] [Stmt] Kind
-  | Class String' [Stmt]
   | Return (Maybe' Expr)
+  | Class String' [Stmt]
   deriving (Show)
 
 data Kind = F | M
@@ -29,6 +29,7 @@ data Expr
   | Grouping Expr
   | Get Expr String'
   | Set Expr String' Expr
+  | This Position
   deriving (Show)
 
 data Literal
@@ -60,7 +61,8 @@ data LogicalOp = And | Or
 
 -- Positions for Runtime Error
 
-type Positioned a = (a, (Int, Int))
+type Position = (Int, Int)
+type Positioned a = (a, Position)
 
 type Expr' = Positioned Expr
 type String' = Positioned String
