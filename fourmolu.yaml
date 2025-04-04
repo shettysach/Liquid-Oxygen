@@ -1,4 +1,4 @@
 indentation: 2
-column-limit: 100
+column-limit: 125
 respectful: true
 trailing-section-operators: false

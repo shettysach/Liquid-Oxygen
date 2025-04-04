@@ -3,7 +3,6 @@
 
 module Resolver where
 
-import Control.Arrow (second)
 import Control.Monad ((>=>))
 import Data.Foldable (foldrM)
 import Data.Map      qualified as Map
@@ -12,66 +11,81 @@ import Environment
 import Error         (ResolveError (ResolveError))
 import Syntax
 
-type State = (Distances, [Scope])
+-- https://hackage.haskell.org/package/extra-1.8/docs/Data-Tuple-Extra.html
 
-data FunctionType = None | Ftype | MType
+first3 :: (a -> a') -> (a, b, c) -> (a', b, c)
+first3 f ~(a, b, c) = (f a, b, c)
+
+second3 :: (b -> b') -> (a, b, c) -> (a, b', c)
+second3 f ~(a, b, c) = (a, f b, c)
+
+third3 :: (c -> c') -> (a, b, c) -> (a, b, c')
+third3 f ~(a, b, c) = (a, b, f c)
+
+--
+
+data FunctionType = None | Fun | Mthd
+  deriving (Show)
+
+type State = (FunctionType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . fst <$> resolveStmts stmts None (Map.empty, [Map.empty])
+resolve stmts = do
+  (_, dists, _) <- resolveStmts stmts (None, Map.empty, [Map.empty])
+  Right (stmts, dists)
 
-resolveStmts :: [Stmt] -> FunctionType -> State -> Either ResolveError State
-resolveStmts [] _ state = Right state
-resolveStmts (stmt : stmts) ftype state@(dists, stack) = case stmt of
-  Expr expr -> resolveExpr expr state >>= resolveStmts stmts ftype
+resolveStmts :: [Stmt] -> State -> Either ResolveError State
+resolveStmts [] state = Right state
+resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
+  Expr expr -> resolveExpr expr state >>= resolveStmts stmts
   Var name (Just expr) ->
     declare name stack
-      >>= resolveExpr expr . (dists,)
-      >>= resolveStmts stmts ftype . second (define name)
-  Var name Nothing -> declareDefine name stack >>= resolveStmts stmts ftype . (dists,)
+      >>= resolveExpr expr . (ftype,dists,)
+      >>= resolveStmts stmts . third3 (define name)
+  Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,dists,)
   Return expr | None <- ftype -> Left $ ResolveError "Top level return" "return" $ snd expr
   Return expr -> case fst expr of
-    Just expr' -> resolveExpr expr' state >>= resolveStmts stmts ftype
-    Nothing    -> resolveStmts stmts ftype state
-  Block stmts' -> resolveStmts stmts' ftype (dists, begin stack) >>= resolveStmts stmts ftype . second tail
-  Print expr -> resolveExpr expr (dists, stack) >>= resolveStmts stmts ftype
+    Just expr' -> resolveExpr expr' state >>= resolveStmts stmts
+    Nothing    -> resolveStmts stmts state
+  Block stmts' -> resolveStmts stmts' (ftype, dists, begin stack) >>= resolveStmts stmts . third3 tail
+  Print expr -> resolveExpr expr state >>= resolveStmts stmts
   If cond thenStmt elseStmt ->
-    resolveExpr cond state >>= resolveStmts [thenStmt] ftype >>= case elseStmt of
-      Just stmt' -> resolveStmts [stmt'] ftype >=> resolveStmts stmts ftype
-      Nothing    -> resolveStmts stmts ftype
-  While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] ftype >>= resolveStmts stmts ftype
-  Function{} -> resolveFunctions stmts Ftype stmt state
+    resolveExpr cond state >>= resolveStmts [thenStmt] >>= case elseStmt of
+      Just stmt' -> resolveStmts [stmt'] >=> resolveStmts stmts
+      Nothing    -> resolveStmts stmts
+  While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] >>= resolveStmts stmts
+  Function{} -> resolveFunctions stmts stmt Fun state
   Class name methods ->
     declareDefine name (define ("this", snd name) stack)
-      >>= (foldrM (resolveFunctions methods MType) `flip` methods) . (dists,) . begin
-      >>= resolveStmts stmts ftype . second tail
+      >>= (foldrM (resolveFunctions stmts `flip` Mthd) `flip` methods) . (ftype,dists,) . begin
+      >>= resolveStmts stmts . first3 (const ftype) . third3 tail
 
-resolveFunctions :: [Stmt] -> FunctionType -> Stmt -> State -> Either ResolveError State
-resolveFunctions stmts ftype (Function name params stmts' _) (dists, stack) =
+resolveFunctions :: [Stmt] -> Stmt -> FunctionType -> State -> Either ResolveError State
+resolveFunctions stmts (Function name params stmts' _) ntype (ftype, dists, stack) =
   foldrM declareDefine (begin $ define name stack) params
-    >>= resolveStmts stmts' ftype . (dists,)
-    >>= resolveStmts stmts None . second tail
+    >>= resolveStmts stmts' . (ntype,dists,)
+    >>= resolveStmts stmts . first3 (const ftype) . third3 tail
 resolveFunctions _ _ _ _ = undefined
 
 resolveExpr :: Expr -> State -> Either ResolveError State
-resolveExpr (Literal _) state            = Right state
-resolveExpr (Grouping expr) state        = resolveExpr expr state
-resolveExpr (Variable name) state        = resolveLocal name state
-resolveExpr (Assignment name expr) state = resolveExpr expr state >>= resolveLocal name
-resolveExpr (Unary _ right) state        = resolveExpr right state
-resolveExpr (Binary _ left right) state  = resolveExpr left state >>= resolveExpr right
-resolveExpr (Logical _ left right) state = resolveExpr left state >>= resolveExpr right
-resolveExpr (Call (expr, _) args) state  = resolveExpr expr state >>= foldrM resolveExpr `flip` args
-resolveExpr (Get expr _) state           = resolveExpr expr state
-resolveExpr (Set expr _ expr') state     = resolveExpr expr state >>= resolveExpr expr'
-resolveExpr (This pos) state             = resolveLocal ("this", pos) state
-
--- resolveExpr (This pos) state             = resolveLocal
+resolveExpr (Literal _) state             = Right state
+resolveExpr (Grouping expr) state         = resolveExpr expr state
+resolveExpr (Variable name) state         = resolveLocal name state
+resolveExpr (Assignment name expr) state  = resolveExpr expr state >>= resolveLocal name
+resolveExpr (Unary _ right) state         = resolveExpr right state
+resolveExpr (Binary _ left right) state   = resolveExpr left state >>= resolveExpr right
+resolveExpr (Logical _ left right) state  = resolveExpr left state >>= resolveExpr right
+resolveExpr (Call (expr, _) args) state   = resolveExpr expr state >>= foldrM resolveExpr `flip` args
+resolveExpr (Get expr _) state            = resolveExpr expr state
+resolveExpr (Set expr _ expr') state      = resolveExpr expr state >>= resolveExpr expr'
+resolveExpr (This pos) state@(Mthd, _, _) = resolveLocal ("this", pos) state
+resolveExpr (This pos) _                  = Left $ ResolveError "Used `this` out of class" "this" pos
 
 resolveLocal :: String' -> State -> Either ResolveError State
-resolveLocal name (_, scope : _)
+resolveLocal name (_, _, scope : _)
   | Map.lookup (fst name) scope == Just False =
       Left $ uncurry (ResolveError "Can't read local variable in own init") name
-resolveLocal name (dists, stack) =
+resolveLocal name state@(_, _, stack) =
   case calcDistance 0 name stack of
-    Just dist -> Right (Map.insert name dist dists, stack)
-    Nothing   -> Right (dists, stack)
+    Just dist -> Right $ second3 (Map.insert name dist) state
+    Nothing   -> Right state

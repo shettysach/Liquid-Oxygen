@@ -29,6 +29,6 @@ steps:
   
   - trailing_whitespace: {}
 
-columns: 100
+columns: 125
 newline: native
 cabal: true
