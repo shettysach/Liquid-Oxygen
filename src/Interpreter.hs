@@ -23,9 +23,9 @@ interpret' (stmt : stmts) dists env = case stmt of
   Expr expr -> evaluate expr dists env >>= interpret' stmts dists . snd
   Var var (Just expr) -> evaluate expr dists env >>= interpret' stmts dists . uncurry (initialize $ fst var)
   Var var Nothing -> interpret' stmts dists (initialize (fst var) Nil env)
-  Return expr -> case fst expr of
-    Just expr' -> evaluate expr' dists env <&> second Env.parent
-    Nothing    -> evaluate (Literal Nil) dists env <&> second Env.parent
+  Return mExpr -> case fst mExpr of
+    Just expr -> evaluate expr dists env <&> second Env.parent
+    Nothing   -> evaluate (Literal Nil) dists env <&> second Env.parent
   Block stmts' -> interpret' stmts' dists (child env) >>= interpret' stmts dists . Env.parent . snd
   Print expr -> do
     (lit, env') <- evaluate expr dists env
@@ -45,15 +45,27 @@ interpret' (stmt : stmts) dists env = case stmt of
       if isTruthy cond'
         then interpret' [stmt'] dists envC >>= while . snd
         else interpret' stmts dists envC
-  Function name params stmts' _ ->
-    let callable args env' =
-          let envF = foldr (uncurry initialize) (child env') (zip (map fst params) args)
-           in runExceptT (interpret' stmts' dists envF)
-        fun = Function' name callable (length params)
-     in interpret' stmts dists (initialize (fst name) fun env)
-  Class name _methods ->
-    let klass = Class' name
+  Function{} ->
+    let (fun, fname) = interpretFunction stmt dists
+     in interpret' stmts dists (initialize fname fun env)
+  Class name methods -> do
+    let mthds' = methodsMap methods Map.empty env
+    let klass = Class' name mthds'
      in interpret' stmts dists (initialize (fst name) klass env)
+   where
+    methodsMap [] mmap = return mmap
+    methodsMap (mthd : mthds) mmap = do
+      let (fun, fname) = interpretFunction mthd dists
+      let mmap' = Map.insert fname fun mmap
+      methodsMap mthds mmap'
+
+interpretFunction :: Stmt -> Distances -> (Literal, String)
+interpretFunction (Function name params stmts' _) dists = do
+  let callable args env' =
+        let envF = foldr (uncurry initialize) (child env') (zip (map fst params) args)
+         in runExceptT (interpret' stmts' dists envF)
+   in (Function' name callable (length params), fst name)
+interpretFunction _ _ = undefined
 
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 evaluate (Literal lit) _ env = except $ Right (lit, env)
@@ -113,8 +125,8 @@ visitCall :: (Int, Int) -> Literal -> Callable
 visitCall _ (Function' name fun arity) args env
   | length args == arity = fun args env
   | otherwise = return $ Left $ uncurry (RuntimeError ("Arity = " ++ show arity)) name
-visitCall _ (Class' name) args env
-  | null args = return $ Right (Instance' name Map.empty, env)
+visitCall _ (Class' name methods) args env
+  | null args = return $ Right (Instance' name methods, env)
   | otherwise = return $ Left $ uncurry (RuntimeError "Class constructor takes no arguments") name
 visitCall pos lit _ _ = return $ Left $ RuntimeError "Calling non-function/non-class" (show lit) pos
 

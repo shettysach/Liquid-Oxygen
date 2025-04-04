@@ -107,7 +107,6 @@ for (t : ts) | T.LeftParen <- fst t = do
   Right (loop, afterStmt)
 for tokens = Left $ ParseError "Expected '(' after 'for'" $ head tokens
 
--- TODO: Handle kind (method/fn)
 function :: Kind -> Parser Stmt
 function kind (t0 : t1 : ts)
   | (T.Identifier name, pos) <- t0
@@ -137,7 +136,7 @@ returnStatement pos tokens = do
   (expr, after) <- expression tokens
   case after of
     t : ts | T.Semicolon <- fst t -> Right (S.Return (Just expr, pos), ts)
-    _                             -> Left $ ParseError "Expected ';'" $ head after
+    _                             -> Left $ ParseError "Expected ';' after return" $ head after
 
 classDeclaration :: Parser Stmt
 classDeclaration (t : ts) | T.Identifier name <- fst t = do
@@ -259,7 +258,7 @@ call tokens = primary tokens >>= call'
   call' (expr, t : ts) = case fst t of
     T.LeftParen -> finish expr ts >>= call'
     T.Dot -> case ts of
-      t' : ts' | T.Identifier prop <- fst t' -> Right (Get expr (prop, snd t'), ts')
+      t' : ts' | T.Identifier prop <- fst t' -> call' (Get expr (prop, snd t'), ts')
       _ -> Left $ ParseError "Expect property name after '.'" (head ts)
     _ -> Right (expr, t : ts)
 
@@ -269,19 +268,15 @@ call tokens = primary tokens >>= call'
       (length args >= 255)
       (Left $ ParseError ">= 255 args" $ head rest)
     case rest of
-      t' : ts'
-        | T.RightParen <- fst t' ->
-            Right (Call (expr, (snd . head) tokens) args, ts')
-      _ -> Left $ ParseError "Expected ')' after args" (head rest)
+      t : ts | T.RightParen <- fst t -> Right (Call (expr, (snd . head) tokens) args, ts)
+      _                              -> Left $ ParseError "Expected ')' after args" (head rest)
 
-  arguments (t' : ts') | T.RightParen <- fst t' = Right ([], t' : ts')
+  arguments tokens' | T.RightParen <- fst (head tokens') = Right ([], tokens')
   arguments tokens' = do
     (arg, rest) <- expression tokens'
     case rest of
-      (t' : ts')
-        | T.Comma <- fst t' ->
-            first (arg :) <$> arguments ts'
-      _ -> Right ([arg], rest)
+      t : ts | T.Comma <- fst t -> first (arg :) <$> arguments ts
+      _                         -> Right ([arg], rest)
 
 primary :: Parser Expr
 primary (t : ts) = case fst t of

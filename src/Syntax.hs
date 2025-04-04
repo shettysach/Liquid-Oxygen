@@ -36,7 +36,7 @@ data Literal
   | String' String
   | Bool' Bool
   | Function' String' Callable Int
-  | Class' String'
+  | Class' String' (Map String Literal)
   | Instance' String' (Map String Literal)
   | Nil
 
@@ -98,7 +98,7 @@ instance Show Literal where
   show (Bool' False)     = "false"
   show Nil               = "nil"
   show (Function' f _ _) = "<fn " ++ fst f ++ ">"
-  show (Class' c)        = "<class " ++ fst c ++ ">"
+  show (Class' c _)      = "<class " ++ fst c ++ ">"
   show (Instance' i _)   = fst i ++ " instance"
 
 instance Show UnaryOp where

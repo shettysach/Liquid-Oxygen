@@ -54,8 +54,7 @@ begin stack = Map.empty : stack
 declare :: String' -> [Scope] -> Either ResolveError [Scope]
 declare (var, pos) stack = case stack of
   scope : scopes
-    | not (Map.member var scope) ->
-        Right $ Map.insert var False scope : scopes
+    | not (Map.member var scope) -> Right $ Map.insert var False scope : scopes
     | otherwise -> Left $ ResolveError "Var already defined" var pos
   [] -> Right stack
 

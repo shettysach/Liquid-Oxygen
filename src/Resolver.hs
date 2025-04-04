@@ -14,7 +14,7 @@ import Syntax
 
 type State = (Distances, [Scope])
 
-data FunctionType = None | Fun
+data FunctionType = None | Ftype | MType
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
 resolve stmts = (stmts,) . fst <$> resolveStmts stmts None (Map.empty, [Map.empty])
@@ -39,11 +39,18 @@ resolveStmts (stmt : stmts) ftype state@(dists, stack) = case stmt of
       Just stmt' -> resolveStmts [stmt'] ftype >=> resolveStmts stmts ftype
       Nothing    -> resolveStmts stmts ftype
   While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] ftype >>= resolveStmts stmts ftype
-  Function name params stmts' _ ->
-    foldrM declareDefine (begin $ define name stack) (reverse params)
-      >>= resolveStmts stmts' Fun . (dists,)
-      >>= resolveStmts stmts None . second tail
-  Class name _mthds -> declareDefine name stack >>= resolveStmts stmts ftype . (dists,)
+  Function{} -> resolveFunctions stmts Ftype stmt state
+  Class name methods ->
+    declareDefine name stack
+      >>= (foldrM (resolveFunctions methods MType) `flip` methods) . (dists,)
+      >>= resolveStmts stmts ftype
+
+resolveFunctions :: [Stmt] -> FunctionType -> Stmt -> State -> Either ResolveError State
+resolveFunctions stmts ftype (Function name params stmts' _) (dists, stack) =
+  foldrM declareDefine (begin $ define name stack) (reverse params)
+    >>= resolveStmts stmts' ftype . (dists,)
+    >>= resolveStmts stmts None . second tail
+resolveFunctions _ _ _ _ = undefined
 
 resolveExpr :: Expr -> State -> Either ResolveError State
 resolveExpr (Literal _) state            = Right state

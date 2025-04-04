@@ -1,7 +1,10 @@
-class X {}
-var a = X();
-print X;
-print a;
+class Test {
+  method() {
+    return "I am a method";
+  }
+}
 
-a.def = "hello";
-print a.def;
+var test = Test();
+print test.method();
+test.method = "hello";
+print test.method;

@@ -26,8 +26,8 @@ main = do
       content <- readFile file
       tokens <- chainIO scan (Just content)
       stmts <- chainIO parse tokens
-      dists <- chainIO resolve stmts
-      endIO interpret dists
+      rests <- chainIO resolve stmts
+      endIO interpret rests
     _ -> putStrLn "Usage: lox <script>"
 
 chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
