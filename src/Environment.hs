@@ -81,7 +81,7 @@ calcDistance dist name' stack' = case stack' of
 getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
   Just dist -> Right dist
-  Nothing   -> Left $ uncurry (RuntimeError "Undefined var") name
+  Nothing   -> Left $ RuntimeError "Undefined var" `uncurry` name
 
 resolveEnv :: String' -> Distances -> Env -> Env
 resolveEnv name dists env = case getDistance name dists of

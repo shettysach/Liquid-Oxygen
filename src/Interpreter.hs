@@ -90,48 +90,62 @@ evaluate (Logical op left right) dists env =
 evaluate (Call callee args) dists env = do
   (callee', env') <- evaluate (fst callee) dists env
   let closure = case callee' of
-        Function' fun _ _ -> resolveEnv fun dists env'
-        _                 -> undefined
+        Function' name _ _ -> resolveEnv name dists env'
+        Class' name _      -> resolveEnv name dists env'
+        _                  -> undefined
       evalArg (lits, envA) arg = first (: lits) <$> evaluate arg dists envA
-      foldArgs args' closure' = first reverse <$> foldM evalArg ([], closure') args'
+      foldArgs args' closure' = foldM evalArg ([], closure') args'
   (args', closure') <- foldArgs args closure
-  lit <- fst <$> ExceptT (visitCall (snd callee) callee' args' closure')
-  except $ Right (lit, env')
+  let litM = visitCall (snd callee) callee' args' closure'
+  ExceptT litM <&> (,env')
 evaluate (Get expr prop) dists env = do
   (inst, envI) <- evaluate expr dists env
   except $ case inst of
     Instance' _ props -> case Map.lookup (fst prop) props of
-      Just lit ->
-        let envT = Env.child $ initialize "this" inst envI
-         in Right (lit, parent envT)
-      Nothing -> Left $ uncurry (RuntimeError "Undefined prop/method") prop
-    _ -> Left $ uncurry (RuntimeError "Only instances have props") prop
+      Just lit -> let envT = Env.child $ initialize "this" inst envI in Right (lit, parent envT)
+      Nothing  -> Left $ uncurry (RuntimeError "Undefined prop/method") prop
+    _ -> Left $ RuntimeError "Only instances have props" `uncurry` prop
 evaluate (Set expr prop expr') dists env = do
   (inst, envI) <- evaluate expr dists env
   (lit, envL) <- evaluate expr' dists envI
   except $ do
     inst' <- case inst of
-      Instance' name props ->
-        let props' = Map.insert (fst prop) lit props
-         in Right $ Instance' name props'
-      _ -> Left $ uncurry (RuntimeError "Only instances have props") prop
-    case expr of
+      Instance' name props -> let props' = Map.insert (fst prop) lit props in Right $ Instance' name props'
+      _                    -> Left $ RuntimeError "Only instances have props" `uncurry` prop
+    env' <- case expr of
       Variable var -> do
         Env.getDistance var dists
           >>= Env.assign var inst' `flip` envL
-          >>= Right . (inst',)
-      _ -> Right (inst', envL)
+      This pos ->
+        Env.assign ("this", pos) inst' 1 envL
+      _ -> return envL
+    Right (inst', env')
 evaluate (This pos) dists env =
   let this = ("this", pos)
    in except $ Env.get this (resolveEnv this dists env) >>= Right . (,env)
 
-visitCall :: (Int, Int) -> Literal -> Callable
-visitCall _ (Function' name fun arity) args env
-  | length args == arity = fun args env
-  | otherwise = return $ Left $ uncurry (RuntimeError ("Arity = " ++ show arity)) name
-visitCall _ (Class' name methods) args env
-  | null args = return $ Right (Instance' name methods, env)
-  | otherwise = return $ Left $ uncurry (RuntimeError "Class constructor takes no arguments") name
+visitCall :: (Int, Int) -> Literal -> [Literal] -> Env -> IO (Either RuntimeError Literal)
+visitCall _ (Function' name fun arity) args closure =
+  if length args == arity
+    then (fmap . fmap) fst (fun args closure)
+    else return $ Left $ RuntimeError ("Arity = " ++ show arity) `uncurry` name
+visitCall _ (Class' name methods) args closure = do
+  let instance' = Instance' name methods
+  case Map.lookup "init" methods of
+    Just (Function' _ initr arity) ->
+      if length args == arity
+        then do
+          let envI = Env.initialize "this" instance' closure
+          result <- initr args envI
+          return $ case result >>= Env.get ("this", snd name) . parent . snd of
+            Right instM -> Right instM
+            Left err    -> Left err
+        else return $ Left $ RuntimeError ("Arity = " ++ show arity) `uncurry` name
+    Nothing ->
+      if null args
+        then return $ Right instance'
+        else return $ Left $ RuntimeError "Class const takes no arguments" `uncurry` name
+    _ -> return $ Left $ RuntimeError "Invalid init in class defn" `uncurry` name
 visitCall pos lit _ _ = return $ Left $ RuntimeError "Calling non-function/non-class" (show lit) pos
 
 visitLogical ::

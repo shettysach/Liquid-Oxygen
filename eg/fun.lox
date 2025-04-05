@@ -16,8 +16,8 @@ if (add(4,5) == add(6,3)) {
     print "Inequal";
 }
 
-fun x(a, a) {
-    return a + a;
+fun x(a, b) {
+    return a + b;
 }
 
 print x(

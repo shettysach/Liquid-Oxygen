@@ -52,7 +52,7 @@ ifStatement (t : ts) | T.LeftParen <- fst t = do
   (condition, afterCondn) <- expression ts
   (thenBranch, afterThen) <- case afterCondn of
     t' : ts' | T.RightParen <- fst t' -> declaration ts'
-    _ -> Left $ ParseError "Expected ')' after if condition" $ head afterCondn
+    _                                 -> Left $ ParseError "Expected ')' after if condition" $ head afterCondn
   (elseBranch, afterElse) <- case afterThen of
     t' : ts' | T.Else <- fst t' -> first Just <$> declaration ts'
     _                           -> Right (Nothing, afterThen)
@@ -64,7 +64,7 @@ while (t : ts) | T.LeftParen <- fst t = do
   (condition, afterCondn) <- expression ts
   case afterCondn of
     t' : ts' | T.RightParen <- fst t' -> first (S.While condition) <$> declaration ts'
-    _ -> Left $ ParseError "Expected ')' after while condition" $ head ts
+    _                                 -> Left $ ParseError "Expected ')' after while condition" $ head ts
 while tokens = Left $ ParseError "Expected '(' after 'while'" $ head tokens
 
 for :: Parser Stmt
@@ -77,7 +77,7 @@ for (t : ts) | T.LeftParen <- fst t = do
       (expr, after) <- expression ts
       case after of
         t2 : ts2 | T.Semicolon <- fst t2 -> Right (Just (Expr expr), ts2)
-        _ -> Left $ ParseError "Expected ';' after loop initializer" $ head after
+        _                                -> Left $ ParseError "Expected ';' after loop initializer" $ head after
 
   (condition, afterCondn) <- case afterInit of
     t1 : ts1 | T.Semicolon <- fst t1 -> Right (Literal (Bool' True), ts1)
@@ -85,7 +85,7 @@ for (t : ts) | T.LeftParen <- fst t = do
       (expr, after) <- expression afterInit
       case after of
         t2 : ts2 | T.Semicolon <- fst t2 -> Right (expr, ts2)
-        _ -> Left $ ParseError "Expected ';' after loop condition" $ head after
+        _                                -> Left $ ParseError "Expected ';' after loop condition" $ head after
 
   (increment, afterInc) <- case afterCondn of
     t1 : ts1 | T.RightParen <- fst t1 -> Right (Nothing, ts1)
@@ -93,7 +93,7 @@ for (t : ts) | T.LeftParen <- fst t = do
       (expr, after) <- expression afterCondn
       case after of
         t2 : ts2 | T.RightParen <- fst t2 -> Right (Just expr, ts2)
-        _ -> Left $ ParseError "Expected ')' after increment" $ head after
+        _                                 -> Left $ ParseError "Expected ')' after increment" $ head after
 
   (stmt, afterStmt) <- declaration afterInc
 
@@ -118,7 +118,7 @@ function kind (t0 : t1 : ts)
 
       (body, afterBody) <- case afterParams of
         (t' : ts') | T.LeftBrace <- fst t' -> block ([], ts')
-        _ -> Left $ ParseError "Expected '{' after params" (head afterParams)
+        _                                  -> Left $ ParseError "Expected '{' after params" (head afterParams)
 
       Right (S.Function (name, pos) params body kind, afterBody)
 function _ tokens = Left $ ParseError "Expected identifier" $ head tokens
@@ -251,7 +251,7 @@ call tokens = primary tokens >>= call'
     T.LeftParen -> finish expr ts >>= call'
     T.Dot -> case ts of
       t' : ts' | T.Identifier prop <- fst t' -> call' (Get expr (prop, snd t'), ts')
-      _ -> Left $ ParseError "Expected prop/method name after '.'" (head ts)
+      _                                      -> Left $ ParseError "Expected prop/method name after '.'" (head ts)
     _ -> Right (expr, t : ts)
 
   finish expr tokens' = do
