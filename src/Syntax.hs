@@ -10,12 +10,9 @@ data Stmt
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
-  | Function String' [String'] [Stmt] Kind
+  | Function String' [String'] [Stmt]
   | Return (Maybe' Expr)
   | Class String' [Stmt]
-  deriving (Show)
-
-data Kind = F | M
   deriving (Show)
 
 data Expr

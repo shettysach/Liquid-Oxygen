@@ -21,7 +21,7 @@ type Parser a = [Token] -> Either ParseError (a, [Token])
 declaration :: Parser Stmt
 declaration (t : ts) = case fst t of
   T.Var       -> varDeclaration ts
-  T.Fun       -> function F ts
+  T.Fun       -> function ts
   T.Class     -> classDeclaration ts
   T.Return    -> returnStatement (snd t) ts
   T.LeftBrace -> first S.Block <$> block ([], ts)
@@ -107,8 +107,8 @@ for (t : ts) | T.LeftParen <- fst t = do
   Right (loop, afterStmt)
 for tokens = Left $ ParseError "Expected '(' after 'for'" $ head tokens
 
-function :: Kind -> Parser Stmt
-function kind (t0 : t1 : ts)
+function :: Parser Stmt
+function (t0 : t1 : ts)
   | (T.Identifier name, pos) <- t0
   , T.LeftParen <- fst t1 = do
       (params, afterParams) <- parameters [] ts
@@ -120,8 +120,8 @@ function kind (t0 : t1 : ts)
         (t' : ts') | T.LeftBrace <- fst t' -> block ([], ts')
         _                                  -> Left $ ParseError "Expected '{' after params" (head afterParams)
 
-      Right (S.Function (name, pos) params body kind, afterBody)
-function _ tokens = Left $ ParseError "Expected identifier" $ head tokens
+      Right (S.Function (name, pos) params body, afterBody)
+function tokens = Left $ ParseError "Expected identifier" $ head tokens
 
 parameters :: [String'] -> Parser [String']
 parameters ps (t : ts)
@@ -148,7 +148,7 @@ classDeclaration tokens = Left $ ParseError "Expected class name" $ head tokens
 
 method :: Parse [Stmt]
 method (mthds, t : ts) | T.RightBrace <- fst t = Right (reverse mthds, ts)
-method (mthds, tokens) = function M tokens >>= method . first (: mthds)
+method (mthds, tokens) = function tokens >>= method . first (: mthds)
 
 -- Expr
 

@@ -23,7 +23,7 @@ instance Show ParseError where
   show (ParseError message (token, position)) =
     "\nPARSE ERROR : "
       ++ message
-      ++ "\nTokenType   : "
+      ++ "\nLexeme      : "
       ++ show token
       ++ "\nPosition    : "
       ++ show position

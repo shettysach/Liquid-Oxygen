@@ -66,14 +66,14 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
       >>= resolveStmts stmts . first3 (const ftype) . third3 tail
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
-resolveFunction (Function name params stmts' _) ntype (_, dists, stack) =
+resolveFunction (Function name params stmts') ntype (_, dists, stack) =
   foldrM declareDefine (begin $ define name stack) params
     >>= resolveStmts stmts' . (ntype,dists,)
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
-resolveMethod mthd@(Function ("init", _) _ _ _) = resolveFunction mthd Init
-resolveMethod mthd                              = resolveFunction mthd Mthd
+resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
+resolveMethod mthd                            = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
 resolveExpr (Literal _) state             = Right state
