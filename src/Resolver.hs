@@ -14,9 +14,6 @@ import Syntax
 
 -- https://hackage.haskell.org/package/extra-1.8/docs/Data-Tuple-Extra.html
 
-fst3 :: (a, b, c) -> a
-fst3 (a, _, _) = a
-
 snd3 :: (a, b, c) -> b
 snd3 (_, b, _) = b
 
@@ -60,7 +57,13 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
       Nothing    -> resolveStmts stmts
   While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] >>= resolveStmts stmts
   Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts . first3 (const ftype) . third3 tail
-  Class name methods ->
+  Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" `uncurry` name'
+  Class name (Just super) methods ->
+    declareDefine name (define ("this", snd name) stack)
+      >>= resolveExpr super . (ftype,dists,)
+      >>= (foldrM resolveMethod `flip` methods) . third3 begin
+      >>= resolveStmts stmts . first3 (const ftype) . third3 tail
+  Class name Nothing methods ->
     declareDefine name (define ("this", snd name) stack)
       >>= (foldrM resolveMethod `flip` methods) . (ftype,dists,) . begin
       >>= resolveStmts stmts . first3 (const ftype) . third3 tail

@@ -1,9 +1,10 @@
 module Environment where
 
-import Data.Map as Map
+import Data.Map     as Map
 
-import Error    (ResolveError (ResolveError), RuntimeError (RuntimeError))
-import Syntax   (Env (Env), Literal, String')
+import Data.Functor ((<&>))
+import Error        (ResolveError (ResolveError), RuntimeError (RuntimeError))
+import Syntax       (Env (Env), Literal, String')
 
 -- data Env = Env (Map String Literal) (Maybe Env)
 
@@ -65,7 +66,7 @@ define name stack = case stack of
   []             -> stack
 
 declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
-declareDefine name stack = declare name stack >>= Right . define name
+declareDefine name stack = declare name stack <&> define name
 
 -- Distances
 

@@ -12,7 +12,7 @@ data Stmt
   | While Expr Stmt
   | Function String' [String'] [Stmt]
   | Return (Maybe' Expr)
-  | Class String' [Stmt]
+  | Class String' (Maybe Expr) [Stmt]
   deriving (Show)
 
 data Expr
@@ -34,8 +34,8 @@ data Literal
   | String' String
   | Bool' Bool
   | Function' String' Callable Int
-  | Class' String' (Map String Literal)
-  | Instance' String' (Map String Literal)
+  | Class' String' (Maybe Literal) (Map String Literal)
+  | Instance' String' (Maybe Literal) (Map String Literal)
   | Nil
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
@@ -97,8 +97,8 @@ instance Show Literal where
   show (Bool' False)     = "false"
   show Nil               = "nil"
   show (Function' f _ _) = "<fn " ++ fst f ++ ">"
-  show (Class' c _)      = "<class " ++ fst c ++ ">"
-  show (Instance' i _)   = fst i ++ " instance"
+  show (Class' c _ _)    = "<class " ++ fst c ++ ">"
+  show (Instance' i _ _) = fst i ++ " instance"
 
 instance Show UnaryOp where
   show Minus' = "-"

@@ -48,15 +48,24 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Function{} ->
     let (fun, fname) = interpretFunction stmt dists
      in interpretStmts stmts dists (initialize fname fun env)
-  Class name methods ->
-    let klass = Class' name (methodsToMap methods Map.empty env)
+  Class name (Just super) methods -> do
+    (literal, env') <- evaluate super dists env
+    super' <- case (literal, super) of
+      (Class'{}, _)     -> pure $ Just literal
+      (_, Variable var) -> throwE $ RuntimeError "Superclass must be class" `uncurry` var
+      _                 -> undefined
+    let klass = Class' name super' (mapMthds methods dists Map.empty)
+     in interpretStmts stmts dists (initialize (fst name) klass env')
+  Class name Nothing methods ->
+    let klass = Class' name Nothing (mapMthds methods dists Map.empty)
      in interpretStmts stmts dists (initialize (fst name) klass env)
-   where
-    methodsToMap [] mmap = pure mmap
-    methodsToMap (mthd : mthds) mmap =
-      let (fun, fname) = interpretFunction mthd dists
-          mmap' = Map.insert fname fun mmap
-       in methodsToMap mthds mmap'
+
+mapMthds :: [Stmt] -> Distances -> Map.Map String Literal -> Map.Map String Literal
+mapMthds [] _ mmap = mmap
+mapMthds (mthd : mthds) dists mmap =
+  let (fun, fname) = interpretFunction mthd dists
+      mmap' = Map.insert fname fun mmap
+   in mapMthds mthds dists mmap'
 
 interpretFunction :: Stmt -> Distances -> (Literal, String)
 interpretFunction (Function name params stmts') dists = do
@@ -69,10 +78,10 @@ interpretFunction _ _ = undefined
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 evaluate (Literal lit) _ env = except $ Right (lit, env)
 evaluate (Grouping expr) dists env = evaluate expr dists env
-evaluate (Variable var) dists env = except $ Env.get var (resolveEnv var dists env) >>= Right . (,env)
+evaluate (Variable var) dists env = except $ Env.get var (resolveEnv var dists env) <&> (,env)
 evaluate (Assignment var expr) dists env = do
   (lit, env') <- evaluate expr dists env
-  except $ Env.getDistance var dists >>= Env.assign var lit `flip` env' >>= Right . (lit,)
+  except $ Env.getDistance var dists >>= Env.assign var lit `flip` env' <&> (lit,)
 evaluate (Unary op right) dists env = do
   (r, envR) <- evaluate right dists env
   except $ visitUnary op r <&> (,envR)
@@ -86,7 +95,7 @@ evaluate (Call callee args) dists env = do
   (callee', env') <- evaluate (fst callee) dists env
   let closure = case callee' of
         Function' name _ _ -> resolveEnv name dists env'
-        Class' name _      -> resolveEnv name dists env'
+        Class' name _ _    -> resolveEnv name dists env'
         _                  -> undefined
       evalArg (lits, envA) arg = first (: lits) <$> evaluate arg dists envA
   (args', closure') <- foldM evalArg ([], closure) args
@@ -95,40 +104,44 @@ evaluate (Call callee args) dists env = do
 evaluate (Get expr prop) dists env = do
   (inst, envI) <- evaluate expr dists env
   except $ case inst of
-    Instance' _ props -> case Map.lookup (fst prop) props of
+    Instance' _ super props -> case Map.lookup (fst prop) props of
       Just lit -> let envT = Env.child $ initialize "this" inst envI in Right (lit, parent envT)
-      Nothing  -> Left $ uncurry (RuntimeError "Undefined property/method") prop
+      Nothing -> case super of
+        Just (Class' _ _ props')
+          | Just lit <- Map.lookup (fst prop) props' ->
+              let envT = Env.child $ initialize "this" inst envI in Right (lit, parent envT)
+        Nothing -> Left $ uncurry (RuntimeError "Undefined property/method") prop
+        _ -> undefined
     _ -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
 evaluate (Set expr prop expr') dists env = do
   (inst, envI) <- evaluate expr dists env
   (lit, envL) <- evaluate expr' dists envI
   except $ do
     inst' <- case inst of
-      Instance' name props -> let props' = Map.insert (fst prop) lit props in Right (Instance' name props')
-      _                    -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
+      Instance' name super props -> let props' = Map.insert (fst prop) lit props in Right (Instance' name super props')
+      _                          -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
     env' <- case expr of
       Variable var -> Env.getDistance var dists >>= Env.assign var inst' `flip` envL
       This pos     -> Env.assign ("this", pos) inst' 1 envL
       _            -> pure envL
     Right (inst', env')
 evaluate (This pos) dists env =
-  let this = ("this", pos)
-   in except $ Env.get this (resolveEnv this dists env) >>= Right . (,env)
+  let this = ("this", pos) in except $ Env.get this (resolveEnv this dists env) <&> (,env)
 
 visitCall :: (Int, Int) -> Literal -> [Literal] -> Env -> ExceptT RuntimeError IO Literal
 visitCall _ (Function' name fun arity) args closure
   | length args == arity = ExceptT $ fmap fst <$> fun args closure
   | otherwise = throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
-visitCall _ (Class' name methods) args closure = do
-  let instance' = Instance' name methods
-  case Map.lookup "init" methods of
-    Just (Function' _ initr arity) | length args == arity -> ExceptT $ do
-      result <- initr args (Env.initialize "this" instance' closure)
-      pure $ result >>= Env.get ("this", snd name) . parent . snd
-    Nothing | null args -> pure instance'
-    Just (Function' _ _ arity) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
-    Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name
-    _ -> throwE $ RuntimeError "Invalid init in class defn" `uncurry` name
+visitCall _ (Class' name super methods) args closure =
+  let instance' = Instance' name super methods
+   in case Map.lookup "init" methods of
+        Just (Function' _ initr arity) | length args == arity -> ExceptT $ do
+          result <- initr args (Env.initialize "this" instance' closure)
+          pure $ result >>= Env.get ("this", snd name) . parent . snd
+        Nothing | null args -> pure instance'
+        Just (Function' _ _ arity) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
+        Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name
+        _ -> throwE $ RuntimeError "Invalid init in class defn" `uncurry` name
 visitCall pos lit _ _ = throwE $ RuntimeError "Calling non-function/non-class" (show lit) pos
 
 visitLogical ::

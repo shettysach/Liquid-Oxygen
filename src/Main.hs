@@ -29,5 +29,5 @@ endIO :: (Show l) => (a -> IO (Either l r)) -> Maybe a -> IO ()
 endIO _ Nothing = return ()
 endIO f (Just x) =
   f x >>= \case
-    Left err -> print err
+    Left l -> print l
     Right _ -> return ()

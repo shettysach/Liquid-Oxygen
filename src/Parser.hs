@@ -78,7 +78,6 @@ for (t : ts) | T.LeftParen <- fst t = do
       case after of
         t2 : ts2 | T.Semicolon <- fst t2 -> Right (Just (Expr expr), ts2)
         _                                -> Left $ ParseError "Expected ';' after loop initializer" $ head after
-
   (condition, afterCondn) <- case afterInit of
     t1 : ts1 | T.Semicolon <- fst t1 -> Right (Literal (Bool' True), ts1)
     _ -> do
@@ -86,7 +85,6 @@ for (t : ts) | T.LeftParen <- fst t = do
       case after of
         t2 : ts2 | T.Semicolon <- fst t2 -> Right (expr, ts2)
         _                                -> Left $ ParseError "Expected ';' after loop condition" $ head after
-
   (increment, afterInc) <- case afterCondn of
     t1 : ts1 | T.RightParen <- fst t1 -> Right (Nothing, ts1)
     _ -> do
@@ -94,9 +92,7 @@ for (t : ts) | T.LeftParen <- fst t = do
       case after of
         t2 : ts2 | T.RightParen <- fst t2 -> Right (Just expr, ts2)
         _                                 -> Left $ ParseError "Expected ')' after increment" $ head after
-
   (stmt, afterStmt) <- declaration afterInc
-
   let body = case increment of
         Nothing  -> stmt
         Just inc -> Block [stmt, Expr inc]
@@ -112,9 +108,8 @@ function (t0 : t1 : ts)
   | (T.Identifier name, pos) <- t0
   , T.LeftParen <- fst t1 = do
       (params, afterParams) <- parameters [] ts
-      when
-        (length params >= 255)
-        (Left $ ParseError ">= 255 params" $ head afterParams)
+
+      when (length params >= 255) (Left $ ParseError ">= 255 params" $ head afterParams)
 
       (body, afterBody) <- case afterParams of
         (t' : ts') | T.LeftBrace <- fst t' -> block ([], ts')
@@ -140,10 +135,16 @@ returnStatement pos tokens = do
 
 classDeclaration :: Parser Stmt
 classDeclaration (t : ts) | T.Identifier name <- fst t = do
-  (methods, afterMethods) <- case ts of
-    t1 : ts1 | T.LeftBrace <- fst t1 -> method ([], ts1)
-    _                                -> Left $ ParseError "Expected '{' before class body" (head ts)
-  Right (S.Class (name, snd t) methods, afterMethods)
+  (super, afterSuper) <- case ts of
+    (T.Less, _) : (T.Identifier name', pos) : ts' -> Right (Just (S.Variable (name', pos)), ts')
+    (T.LeftBrace, _) : _                          -> Right (Nothing, ts)
+    (T.Less, _) : ts'                             -> Left $ ParseError "Expected superclass after <" (head ts')
+    _                                             -> Left $ ParseError "Expected '<' or '{'" (head ts)
+  (methods, afterMethods) <- case afterSuper of
+    (T.LeftBrace, _) : ts' -> method ([], ts') -- NOTE: Redundant check optimized?
+    _                      -> Left $ ParseError "Expected '{' before class body" (head ts)
+
+  Right (S.Class (name, snd t) super methods, afterMethods)
 classDeclaration tokens = Left $ ParseError "Expected class name" $ head tokens
 
 method :: Parse [Stmt]
