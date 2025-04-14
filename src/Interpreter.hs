@@ -46,8 +46,9 @@ interpretStmts (stmt : stmts) dists env = case stmt of
             else interpretStmts stmts dists envC
      in while env
   Function{} ->
-    let (fun, fname) = interpretFunction stmt dists env
-     in interpretStmts stmts dists (initialize fname fun env)
+    let closure = initialize fname fun env
+        (fun, fname) = interpretFunction stmt dists closure
+     in interpretStmts stmts dists closure
   Class name (Just super) methods -> do
     (literal, env') <- evaluate super dists env
     super' <- case (literal, super) of
@@ -62,8 +63,8 @@ interpretStmts (stmt : stmts) dists env = case stmt of
 
 interpretFunction :: Stmt -> Distances -> Env -> (Literal, String)
 interpretFunction (Function name params stmts') dists closure = do
-  let callable args env' =
-        let envF = foldr (uncurry initialize) (child env') (zip (map fst params) args)
+  let callable args env =
+        let envF = foldr (uncurry initialize) (child env) (zip (map fst params) args)
          in runExceptT (interpretStmts stmts' dists envF)
    in (Function' name callable (length params) closure, fst name)
 interpretFunction _ _ _ = undefined
