@@ -28,6 +28,3 @@ var a = "global";
 
   hello();
 }
-
-class X {}
-X();

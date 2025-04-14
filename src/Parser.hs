@@ -119,11 +119,10 @@ function (t0 : t1 : ts)
 function tokens = Left $ ParseError "Expected identifier" $ head tokens
 
 parameters :: [String'] -> Parser [String']
-parameters ps (t : ts)
-  | T.RightParen <- fst t = Right (ps, ts)
-  | T.Comma <- fst t = parameters ps ts
-  | (T.Identifier param, pos) <- t = parameters ((param, pos) : ps) ts
-parameters _ tokens = Left $ ParseError "Expected ')', ',' or identifier" $ head tokens
+parameters ps ((T.RightParen, _) : ts)       = Right (ps, ts)
+parameters ps ((T.Comma, _) : ts)            = Right (ps, ts)
+parameters ps ((T.Identifier prm, pos) : ts) = parameters ((prm, pos) : ps) ts
+parameters _ tokens                          = Left $ ParseError "Expected ')', ',' or identifier" $ head tokens
 
 returnStatement :: (Int, Int) -> Parser Stmt
 returnStatement pos (t : ts) | T.Semicolon <- fst t = Right (S.Return (Nothing, pos), ts)
@@ -174,10 +173,10 @@ or tokens =
  where
   or' (expr, []) = Right (expr, [])
   or' (expr, t : ts) = case fst t of
-    T.Or -> loop S.Or
+    T.Or -> recurse S.Or
     _    -> Right (expr, t : ts)
    where
-    loop op = Parser.and ts >>= or' . first (Logical (op, snd t) expr)
+    recurse op = Parser.and ts >>= or' . first (Logical (op, snd t) expr)
 
 and :: Parser Expr
 and tokens =
@@ -185,10 +184,10 @@ and tokens =
  where
   and' (expr, []) = Right (expr, [])
   and' (expr, t : ts) = case fst t of
-    T.And -> loop S.And
+    T.And -> recurse S.And
     _     -> Right (expr, t : ts)
    where
-    loop op =
+    recurse op =
       equality ts >>= and' . first (Logical (op, snd t) expr)
 
 equality :: Parser Expr
@@ -196,46 +195,46 @@ equality tokens = comparison tokens >>= equality'
  where
   equality' (expr, []) = Right (expr, [])
   equality' (expr, t : ts) = case fst t of
-    T.BangEqual  -> loop S.BangEqual
-    T.EqualEqual -> loop S.EqualEqual
+    T.BangEqual  -> recurse S.BangEqual
+    T.EqualEqual -> recurse S.EqualEqual
     _            -> Right (expr, t : ts)
    where
-    loop op = comparison ts >>= equality' . first (Binary (op, snd t) expr)
+    recurse op = comparison ts >>= equality' . first (Binary (op, snd t) expr)
 
 comparison :: Parser Expr
 comparison tokens = term tokens >>= comparison'
  where
   comparison' (expr, []) = Right (expr, [])
   comparison' (expr, t : ts) = case fst t of
-    T.Greater      -> loop S.Greater
-    T.GreaterEqual -> loop S.GreaterEqual
-    T.Less         -> loop S.Less
-    T.LessEqual    -> loop S.LessEqual
+    T.Greater      -> recurse S.Greater
+    T.GreaterEqual -> recurse S.GreaterEqual
+    T.Less         -> recurse S.Less
+    T.LessEqual    -> recurse S.LessEqual
     _              -> Right (expr, t : ts)
    where
-    loop op = term ts >>= comparison' . first (Binary (op, snd t) expr)
+    recurse op = term ts >>= comparison' . first (Binary (op, snd t) expr)
 
 term :: Parser Expr
 term tokens = factor tokens >>= term'
  where
   term' (expr, []) = Right (expr, [])
   term' (expr, t : ts) = case fst t of
-    T.Minus -> loop S.Minus
-    T.Plus  -> loop S.Plus
+    T.Minus -> recurse S.Minus
+    T.Plus  -> recurse S.Plus
     _       -> Right (expr, t : ts)
    where
-    loop op = factor ts >>= term' . first (Binary (op, snd t) expr)
+    recurse op = factor ts >>= term' . first (Binary (op, snd t) expr)
 
 factor :: Parser Expr
 factor tokens = unary tokens >>= factor'
  where
   factor' (expr, []) = Right (expr, [])
   factor' (expr, t : ts) = case fst t of
-    T.Slash -> loop S.Slash
-    T.Star  -> loop S.Star
+    T.Slash -> recurse S.Slash
+    T.Star  -> recurse S.Star
     _       -> Right (expr, t : ts)
    where
-    loop op = unary ts >>= factor' . first (Binary (op, snd t) expr)
+    recurse op = unary ts >>= factor' . first (Binary (op, snd t) expr)
 
 unary :: Parser Expr
 unary [] = call []

@@ -15,7 +15,7 @@ data TokenType
   | Semicolon
   | Slash
   | Star
-  | -- One or two character tokens.
+  | -- One or two character tokens
     Bang
   | BangEqual
   | Equal
@@ -24,11 +24,11 @@ data TokenType
   | GreaterEqual
   | Less
   | LessEqual
-  | -- Literals.
+  | -- Variables and literals
     Identifier String
   | Number' Double
   | String' String
-  | -- Keywords.
+  | -- Keywords
     And
   | Class
   | Else

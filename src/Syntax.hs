@@ -33,10 +33,13 @@ data Literal
   = Number' Double
   | String' String
   | Bool' Bool
-  | Function' String' Callable Int
+  | Function' String' Callable Int Env
   | Class' String' (Maybe Literal) (Map String Literal)
   | Instance' String' (Maybe Literal) (Map String Literal)
   | Nil
+
+data Env = Env (Map String Literal) (Maybe Env)
+  deriving (Show)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
@@ -70,11 +73,6 @@ type UnaryOp' = Positioned UnaryOp
 type BinaryOp' = Positioned BinaryOp
 type LogicalOp' = Positioned LogicalOp
 
--- Env
-
-data Env = Env (Map String Literal) (Maybe Env)
-  deriving (Show)
-
 -- Traits
 
 isTruthy :: Literal -> Bool
@@ -83,22 +81,22 @@ isTruthy Nil       = False
 isTruthy _         = True
 
 instance Eq Literal where
-  String' l == String' r             = l == r
-  Number' l == Number' r             = l == r
-  Bool' l == Bool' r                 = l == r
-  Nil == Nil                         = True
-  Function' l _ _ == Function' r _ _ = l == r
-  _ == _                             = False
+  String' l == String' r                 = l == r
+  Number' l == Number' r                 = l == r
+  Bool' l == Bool' r                     = l == r
+  Nil == Nil                             = True
+  Function' l _ _ _ == Function' r _ _ _ = l == r
+  _ == _                                 = False
 
 instance Show Literal where
-  show (String' s)       = s
-  show (Number' n)       = show n
-  show (Bool' True)      = "true"
-  show (Bool' False)     = "false"
-  show Nil               = "nil"
-  show (Function' f _ _) = "<fn " ++ fst f ++ ">"
-  show (Class' c _ _)    = "<class " ++ fst c ++ ">"
-  show (Instance' i _ _) = fst i ++ " instance"
+  show (String' s)         = s
+  show (Number' n)         = show n
+  show (Bool' True)        = "true"
+  show (Bool' False)       = "false"
+  show Nil                 = "nil"
+  show (Function' f _ _ _) = "<fn " ++ fst f ++ ">"
+  show (Class' c _ _)      = "<class " ++ fst c ++ ">"
+  show (Instance' i _ _)   = fst i ++ " instance"
 
 instance Show UnaryOp where
   show Minus' = "-"

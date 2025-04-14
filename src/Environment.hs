@@ -11,39 +11,36 @@ import Syntax       (Env (Env), Literal, String')
 global :: Env
 global = Env Map.empty Nothing
 
-get :: String' -> Env -> Either RuntimeError Literal
-get (var, pos) (Env scope _) = case Map.lookup var scope of
-  Just lit -> Right lit
-  Nothing  -> Left $ RuntimeError "Undefined var" var pos
-
 initialize :: String -> Literal -> Env -> Env
 initialize name value (Env scope prev) = Env (Map.insert name value scope) prev
 
-assign :: String' -> Literal -> Int -> Env -> Either RuntimeError Env
-assign (var, _) value 0 (Env scope prev)
-  | Map.member var scope =
-      Right $ Env (Map.insert var value scope) prev
-assign name value dist (Env scope (Just prev)) =
-  Env scope . Just <$> assign name value (dist - 1) prev
-assign (var, pos) _ _ _ = Left $ RuntimeError "Undefined var" var pos
+get :: String' -> Env -> Either RuntimeError Literal
+get name (Env scope _) = case Map.lookup (fst name) scope of
+  Just lit -> Right lit
+  Nothing  -> Left $ RuntimeError "Undefined var" `uncurry` name
+
+getAt :: String' -> Distances -> Env -> Either RuntimeError Literal
+getAt name dists env = getDistance name dists >>= get name . (`ancestor` env)
+
+assignAt :: String' -> Literal -> Int -> Env -> Either RuntimeError Env
+assignAt (var, _) value 0 (Env scope prev) | Map.member var scope = Right $ Env (Map.insert var value scope) prev
+assignAt name value dist (Env scope (Just prev)) = Env scope . Just <$> assignAt name value (dist - 1) prev
+assignAt (var, pos) _ _ _ = Left $ RuntimeError "Undefined var" var pos
 
 child :: Env -> Env
 child env = Env Map.empty (Just env)
 
 parent :: Env -> Env
 parent (Env _ (Just prev)) = prev
-parent env                 = env
+parent env                 = error (show env)
 
 ancestor :: Int -> Env -> Env
-ancestor dist env =
-  if dist == 0
-    then env
-    else ancestor (dist - 1) (parent env)
+ancestor 0 env = env
+ancestor d env = ancestor (d - 1) (parent env)
 
 progenitor :: Env -> Env
-progenitor env@(Env _ prev) = case prev of
-  Nothing      -> env
-  (Just prev') -> progenitor prev'
+progenitor (Env _ (Just prev)) = progenitor prev
+progenitor env                 = env
 
 -- Scope
 
@@ -55,36 +52,30 @@ begin stack = Map.empty : stack
 declare :: String' -> [Scope] -> Either ResolveError [Scope]
 declare (var, pos) stack = case stack of
   scope : scopes
-    | not (Map.member var scope) ->
-        Right $ Map.insert var False scope : scopes
+    | not (Map.member var scope) -> Right $ Map.insert var False scope : scopes
     | otherwise -> Left $ ResolveError "Var already defined" var pos
   [] -> Right stack
 
-define :: String' -> [Scope] -> [Scope]
+define :: String -> [Scope] -> [Scope]
 define name stack = case stack of
-  scope : scopes -> Map.insert (fst name) True scope : scopes
-  []             -> stack
+  scope : scopes -> Map.insert name True scope : scopes
+  []             -> undefined
 
 declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
-declareDefine name stack = declare name stack <&> define name
+declareDefine name stack = declare name stack <&> define (fst name)
 
 -- Distances
 
 type Distances = Map String' Int
 
 calcDistance :: Int -> String' -> [Scope] -> Maybe Int
-calcDistance dist name' stack' = case stack' of
+calcDistance dist name stack = case stack of
   scope : scopes
-    | Map.member (fst name') scope -> Just dist
-    | otherwise -> calcDistance (dist + 1) name' scopes
+    | Map.member (fst name) scope -> Just dist
+    | otherwise -> calcDistance (dist + 1) name scopes
   [] -> Nothing
 
 getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
   Just dist -> Right dist
   Nothing   -> Left $ RuntimeError "Undefined var" `uncurry` name
-
-resolveEnv :: String' -> Distances -> Env -> Env
-resolveEnv name dists env = case getDistance name dists of
-  Right dist -> ancestor dist env
-  Left _     -> progenitor env

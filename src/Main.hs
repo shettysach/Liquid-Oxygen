@@ -18,6 +18,17 @@ main =
         >>= endIO interpret
     _ -> putStrLn "Usage: lox <script>"
 
+-- main :: IO ()
+-- main =
+--   getArgs >>= \case
+--     [file] -> do
+--       source <- readFile file
+--       tokens <- chainIO scan (Just source)
+--       stmtx <- chainIO parse tokens
+--       stmts <- chainIO resolve stmtx
+--       endIO interpret stmts
+--     _ -> putStrLn "Usage: lox <script>"
+
 chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
 chainIO _ Nothing = return Nothing
 chainIO f (Just x) =

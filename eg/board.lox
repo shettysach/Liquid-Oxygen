@@ -1,0 +1,29 @@
+{
+  var a = 10;
+  
+  
+  fun b() {
+      print a;
+  }
+  
+
+  class S {
+      init() {
+          b();
+          print "hi";
+      }
+
+      hi() {
+          b();
+          print "hi";
+      }
+  }
+  
+  {
+      {
+      b();
+      var x = S();
+      }
+      b();
+  } 
+}

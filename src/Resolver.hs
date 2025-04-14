@@ -1,13 +1,16 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE TupleSections       #-}
+{-# HLINT ignore "Redundant <&>" #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module Resolver where
 
 import Control.Monad ((>=>))
 import Data.Foldable (foldrM)
+import Data.Functor  ((<&>))
 import Data.Map      qualified as Map
-
 import Data.Maybe    (isJust)
+
 import Environment
 import Error         (ResolveError (ResolveError))
 import Syntax
@@ -42,7 +45,10 @@ resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
 resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
   Expr expr -> resolveExpr expr state >>= resolveStmts stmts
-  Var name (Just expr) -> declare name stack >>= resolveExpr expr . (ftype,dists,) >>= resolveStmts stmts . third3 (define name)
+  Var name (Just expr) ->
+    declare name stack
+      >>= resolveExpr expr . (ftype,dists,)
+      >>= resolveStmts stmts . third3 (define $ fst name)
   Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,dists,)
   Return mExpr | None <- ftype -> Left $ ResolveError "Top level return" "return" $ snd mExpr
   Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" "return" $ snd mExpr
@@ -55,23 +61,32 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
     resolveExpr cond state >>= resolveStmts [thenStmt] >>= case elseStmt of
       Just stmt' -> resolveStmts [stmt'] >=> resolveStmts stmts
       Nothing    -> resolveStmts stmts
-  While cond stmt' -> resolveExpr cond state >>= resolveStmts [stmt'] >>= resolveStmts stmts
-  Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts . first3 (const ftype) . third3 tail
-  Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" `uncurry` name'
+  While cond stmt' ->
+    resolveExpr cond state
+      >>= resolveStmts [stmt']
+      >>= resolveStmts stmts
+  Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts
+  Class name (Just (Variable name')) _
+    | fst name == fst name' ->
+        Left $ ResolveError "Can't inherit from self" `uncurry` name'
   Class name (Just super) methods ->
-    declareDefine name (define ("this", snd name) stack)
+    declareDefine name stack
       >>= resolveExpr super . (ftype,dists,)
-      >>= (foldrM resolveMethod `flip` methods) . third3 begin
-      >>= resolveStmts stmts . first3 (const ftype) . third3 tail
+      <&> third3 (define "this" . begin)
+      >>= foldrM resolveMethod `flip` methods
+      >>= resolveStmts stmts . third3 tail
   Class name Nothing methods ->
-    declareDefine name (define ("this", snd name) stack)
-      >>= (foldrM resolveMethod `flip` methods) . (ftype,dists,) . begin
-      >>= resolveStmts stmts . first3 (const ftype) . third3 tail
+    declareDefine name stack
+      <&> (ftype,dists,) . define "this" . begin
+      >>= (foldrM resolveMethod `flip` methods)
+      >>= resolveStmts stmts . third3 tail
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
-resolveFunction (Function name params stmts') ntype (_, dists, stack) =
-  foldrM declareDefine (begin $ define name stack) params
+resolveFunction (Function name params stmts') ntype (ftype, dists, stack) = do
+  declareDefine name stack
+    >>= (foldrM declareDefine `flip` params) . begin
     >>= resolveStmts stmts' . (ntype,dists,)
+    <&> first3 (const ftype) . third3 tail
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
@@ -98,7 +113,6 @@ resolveLocal name state
   | scope : _ <- thd3 state
   , Map.lookup (fst name) scope == Just False =
       Left $ ResolveError "Can't read local variable in own init" `uncurry` name
-resolveLocal name state =
-  case calcDistance 0 name (thd3 state) of
-    Just dist -> Right $ second3 (Map.insert name dist) state
-    Nothing   -> Right state
+resolveLocal name state = case calcDistance 0 name (thd3 state) of
+  Just dist -> Right $ second3 (Map.insert name dist) state
+  Nothing   -> Right state
