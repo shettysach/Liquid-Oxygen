@@ -1,29 +1,32 @@
-{
-  var a = 10;
-  
-  
-  fun b() {
-      print a;
-  }
-  
+{ 
+    class Tuple {
+        init(x, y) {
+           this.x = x;
+           this.y = y;
+        }
 
-  class S {
-      init() {
-          b();
-          print "hi";
-      }
+        first() {
+           return this.x;
+        }
 
-      hi() {
-          b();
-          print "hi";
-      }
-  }
-  
-  {
-      {
-      b();
-      var x = S();
-      }
-      b();
-  } 
+        second() {
+           return this.y;
+        }
+
+        sum() {
+           return this.x + this.y;
+        }
+
+        prod() {
+           return this.x * this.y;
+        }
+    }
+
+    {
+        var t = Tuple(3,4);
+        print t.first();
+        print t.second();
+        print t.sum();
+        print t.prod();
+    }
 }

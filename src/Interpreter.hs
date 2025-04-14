@@ -103,8 +103,13 @@ evaluate (Get expr prop) dists env = do
   (inst, envI) <- evaluate expr dists env
   except $ case inst of
     Instance' _ super props -> case Map.lookup (fst prop) props of
-      Just lit -> Right (lit, initialize "this" inst $ child envI)
-      Nothing  -> superLookup super prop inst envI
+      Just lit -> case lit of
+        Function' name fn arity closure ->
+          let closure' = initialize "this" inst $ child closure
+              bound = Function' name fn arity closure'
+           in Right (bound, envI)
+        _ -> Right (lit, envI)
+      Nothing -> superLookup super prop inst envI
     _ -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
 evaluate (Set expr prop expr') dists env = do
   (inst, envI) <- evaluate expr dists env
@@ -124,8 +129,13 @@ evaluate (This pos) dists env =
 
 superLookup :: Maybe Literal -> String' -> Literal -> Env -> Either RuntimeError (Literal, Env)
 superLookup (Just (Class' _ super props)) prop inst envI = case Map.lookup (fst prop) props of
-  Just lit -> Right (lit, parent $ initialize "this" inst $ child envI) -- ERROR
-  Nothing  -> superLookup super prop inst envI
+  Just lit -> case lit of
+    Function' name fn arity closure ->
+      let closure' = initialize "this" inst $ child closure
+          bound = Function' name fn arity closure'
+       in Right (bound, envI)
+    _ -> Right (lit, initialize "this" inst $ child envI)
+  Nothing -> superLookup super prop inst envI
 superLookup Nothing prop _ _ = Left $ uncurry (RuntimeError "Undefined property/method") prop
 superLookup _ _ _ _ = undefined
 

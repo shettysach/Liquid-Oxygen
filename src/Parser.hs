@@ -120,7 +120,7 @@ function tokens = Left $ ParseError "Expected identifier" $ head tokens
 
 parameters :: [String'] -> Parser [String']
 parameters ps ((T.RightParen, _) : ts)       = Right (ps, ts)
-parameters ps ((T.Comma, _) : ts)            = Right (ps, ts)
+parameters ps ((T.Comma, _) : ts)            = parameters ps ts
 parameters ps ((T.Identifier prm, pos) : ts) = parameters ((prm, pos) : ps) ts
 parameters _ tokens                          = Left $ ParseError "Expected ')', ',' or identifier" $ head tokens
 
