@@ -15,31 +15,14 @@ import Environment
 import Error         (ResolveError (ResolveError))
 import Syntax
 
--- https://hackage.haskell.org/package/extra-1.8/docs/Data-Tuple-Extra.html
+data FunctionType = NonF | Fun | Mthd | Init
 
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
-
-thd3 :: (a, b, c) -> c
-thd3 (_, _, c) = c
-
-first3 :: (a -> a') -> (a, b, c) -> (a', b, c)
-first3 f ~(a, b, c) = (f a, b, c)
-
-second3 :: (b -> b') -> (a, b, c) -> (a, b', c)
-second3 f ~(a, b, c) = (a, f b, c)
-
-third3 :: (c -> c') -> (a, b, c) -> (a, b, c')
-third3 f ~(a, b, c) = (a, b, f c)
-
---
-
-data FunctionType = None | Fun | Mthd | Init
+data ClassType = NonC | Super | Sub
 
 type State = (FunctionType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . snd3 <$> resolveStmts stmts (None, Map.empty, [Map.empty])
+resolve stmts = (stmts,) . snd3 <$> resolveStmts stmts (NonF, Map.empty, [Map.empty])
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
@@ -50,7 +33,7 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
       >>= resolveExpr expr . (ftype,dists,)
       >>= resolveStmts stmts . third3 (define $ fst name)
   Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,dists,)
-  Return mExpr | None <- ftype -> Left $ ResolveError "Top level return" "return" $ snd mExpr
+  Return mExpr | NonF <- ftype -> Left $ ResolveError "Top level return" "return" $ snd mExpr
   Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" "return" $ snd mExpr
   Return mExpr -> case fst mExpr of
     Just expr -> resolveExpr expr state >>= resolveStmts stmts
@@ -78,7 +61,7 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
   Class name Nothing methods ->
     declareDefine name stack
       <&> (ftype,dists,) . define "this" . begin
-      >>= (foldrM resolveMethod `flip` methods)
+      >>= foldrM resolveMethod `flip` methods
       >>= resolveStmts stmts . third3 tail
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
@@ -116,3 +99,20 @@ resolveLocal name state
 resolveLocal name state = case calcDistance 0 name (thd3 state) of
   Just dist -> Right $ second3 (Map.insert name dist) state
   Nothing   -> Right state
+
+-- https://hackage.haskell.org/package/extra-1.8/docs/Data-Tuple-Extra.html
+
+snd3 :: (a, b, c) -> b
+snd3 (_, b, _) = b
+
+thd3 :: (a, b, c) -> c
+thd3 (_, _, c) = c
+
+first3 :: (a -> a') -> (a, b, c) -> (a', b, c)
+first3 f ~(a, b, c) = (f a, b, c)
+
+second3 :: (b -> b') -> (a, b, c) -> (a, b', c)
+second3 f ~(a, b, c) = (a, f b, c)
+
+third3 :: (c -> c') -> (a, b, c) -> (a, b, c')
+third3 f ~(a, b, c) = (a, b, f c)

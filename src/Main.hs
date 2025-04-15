@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 import System.Environment (getArgs)
+import System.IO          (hPrint, stderr)
 
 import Interpreter        (interpret)
 import Parser             (parse)
@@ -18,27 +19,16 @@ main =
         >>= endIO interpret
     _ -> putStrLn "Usage: lox <script>"
 
--- main :: IO ()
--- main =
---   getArgs >>= \case
---     [file] -> do
---       source <- readFile file
---       tokens <- chainIO scan (Just source)
---       stmtx <- chainIO parse tokens
---       stmts <- chainIO resolve stmtx
---       endIO interpret stmts
---     _ -> putStrLn "Usage: lox <script>"
-
 chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
-chainIO _ Nothing = return Nothing
+chainIO _ Nothing = pure Nothing
 chainIO f (Just x) =
   case f x of
-    Left l  -> print l >> return Nothing
-    Right r -> return (Just r)
+    Left l  -> hPrint stderr l >> pure Nothing
+    Right r -> pure (pure r)
 
 endIO :: (Show l) => (a -> IO (Either l r)) -> Maybe a -> IO ()
 endIO _ Nothing = return ()
 endIO f (Just x) =
   f x >>= \case
-    Left l -> print l
-    Right _ -> return ()
+    Left l -> hPrint stderr l
+    Right _ -> pure ()

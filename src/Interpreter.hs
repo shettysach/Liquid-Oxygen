@@ -149,7 +149,7 @@ visitCall _ (Class' name super methods) args closure =
    in case Map.lookup "init" methods of
         Just (Function' _ initr arity _) | length args == arity -> ExceptT $ do
           result <- initr args (initialize "this" instance' closure)
-          pure $ result >>= get ("this", snd name) . parent . snd
+          pure $ result >>= getScope ("this", snd name) . parent . snd
         Nothing | null args -> pure instance'
         Just (Function' _ _ arity _) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
         Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name

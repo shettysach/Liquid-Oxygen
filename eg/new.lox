@@ -1,44 +1,14 @@
-{
-  var m = 10;
-  
-  class S {
-      twice_removed() {
-          print "deutschland";
-          m = 11;
-      }
+fun makeCounter() {
+  var i = 0;
+  fun count() {
+    i = i + 1;
+    print i;
   }
-  
-  class A < S {
-      a() {
-          this.c();
-      }
-  
-      c() {
-          print "hello";
-      }
-      
-      say() {
-          print this.word;
-      }
-  
-      m() {}
-  }
-  
-  class B < A {
-      b() {
-          this.d();
-      }
-  
-      d() {
-          print "world";
-      }
-  }
-  
-  print m;
-  var x = B();
-  x.a();
-  x.b();
-  x.word = "hi";
-  x.say();
-  x.twice_removed();
+
+  return count;
 }
+
+var counter = makeCounter();
+counter();
+counter();
+counter();

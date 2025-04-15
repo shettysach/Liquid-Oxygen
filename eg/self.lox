@@ -11,3 +11,13 @@ print x(
     x("Hello", ", "), 
     x("World", "!")
 ); 
+
+fun z() {
+    y(10,10);
+}
+
+fun y(a,b) {
+    print a + b;
+}
+
+z();

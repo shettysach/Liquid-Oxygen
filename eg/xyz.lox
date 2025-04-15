@@ -1,0 +1,44 @@
+{
+  var m = 10;
+  
+  class S {
+      twice_removed() {
+          print "deutschland";
+          m = 11;
+      }
+  }
+  
+  class A < S {
+      a() {
+          this.c();
+      }
+  
+      c() {
+          print "hello";
+      }
+      
+      say() {
+          print this.word;
+      }
+  }
+  
+  class B < A {
+      b() {
+          this.d();
+      }
+  
+      d() {
+          print "world";
+      }
+  }
+  
+  print m;
+  var x = B();
+  x.a();
+  x.b();
+  x.word = "hi";
+  x.say();
+  
+  x.twice_removed();
+  print m;
+}

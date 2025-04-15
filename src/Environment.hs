@@ -14,13 +14,13 @@ global = Env Map.empty Nothing
 initialize :: String -> Literal -> Env -> Env
 initialize name value (Env scope prev) = Env (Map.insert name value scope) prev
 
-get :: String' -> Env -> Either RuntimeError Literal
-get name (Env scope _) = case Map.lookup (fst name) scope of
+getScope :: String' -> Env -> Either RuntimeError Literal
+getScope name (Env scope _) = case Map.lookup (fst name) scope of
   Just lit -> Right lit
   Nothing  -> Left $ RuntimeError "Undefined var" `uncurry` name
 
 getAt :: String' -> Distances -> Env -> Either RuntimeError Literal
-getAt name dists env = getDistance name dists >>= get name . (`ancestor` env)
+getAt name dists env = getDistance name dists >>= getScope name . ancestor env
 
 assignAt :: String' -> Literal -> Int -> Env -> Either RuntimeError Env
 assignAt (var, _) value 0 (Env scope prev) | Map.member var scope = Right $ Env (Map.insert var value scope) prev
@@ -34,9 +34,9 @@ parent :: Env -> Env
 parent (Env _ (Just prev)) = prev
 parent env                 = error (show env)
 
-ancestor :: Int -> Env -> Env
-ancestor 0 env = env
-ancestor d env = ancestor (d - 1) (parent env)
+ancestor :: Env -> Int -> Env
+ancestor env 0 = env
+ancestor env d = ancestor (parent env) (d - 1)
 
 progenitor :: Env -> Env
 progenitor (Env _ (Just prev)) = progenitor prev
