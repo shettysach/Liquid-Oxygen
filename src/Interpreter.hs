@@ -1,15 +1,18 @@
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE RecursiveDo         #-}
 {-# LANGUAGE TupleSections       #-}
 
 module Interpreter where
 
 import Control.Arrow              (first, second)
-import Control.Monad              (foldM, void)
+import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
+import Control.Monad.Trans.Class  (lift)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE)
+import Data.Foldable              (foldlM, foldrM)
 import Data.Functor               ((<&>))
-
 import Data.Map                   qualified as Map
+
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
@@ -21,8 +24,11 @@ interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal
 interpretStmts [] _ env = pure (Nil, env)
 interpretStmts (stmt : stmts) dists env = case stmt of
   Expr expr -> evaluate expr dists env >>= interpretStmts stmts dists . snd
-  Var var (Just expr) -> evaluate expr dists env >>= interpretStmts stmts dists . uncurry (initialize $ fst var)
-  Var var Nothing -> interpretStmts stmts dists $ initialize (fst var) Nil env
+  Var var (Just expr) ->
+    evaluate expr dists env
+      >>= liftIO . uncurry (initialize $ fst var)
+      >>= interpretStmts stmts dists
+  Var var Nothing -> liftIO (initialize (fst var) Nil env) >>= interpretStmts stmts dists
   Return (Just expr, _) -> evaluate expr dists env <&> second parent
   Return (Nothing, _) -> evaluate (Literal Nil) dists env <&> second parent
   Block stmts' -> interpretStmts stmts' dists (child env) >>= interpretStmts stmts dists . parent . snd
@@ -41,44 +47,49 @@ interpretStmts (stmt : stmts) dists env = case stmt of
             then interpretStmts [stmt'] dists envC >>= while . snd
             else interpretStmts stmts dists envC
      in while env
-  Function{} ->
-    let closure = initialize fname fun env
-        (fun, fname) = interpretFunction stmt dists closure
-     in interpretStmts stmts dists closure
+  Function{} -> mdo
+    closure <- lift $ initialize name fun env
+    (name, fun) <- lift $ interpretFunction stmt dists closure
+    interpretStmts stmts dists closure
   Class name (Just super) methods -> do
     (literal, env') <- evaluate super dists env
     super' <- case literal of
       Class'{} -> pure $ Just literal
       _        -> throwE $ RuntimeError "Superclass must be a class" `uncurry` name
-    let envS = initialize "super" literal $ child env'
-    let klass = Class' name super' (mapMethods methods dists envS Map.empty)
-    interpretStmts stmts dists $ initialize (fst name) klass env'
-  Class name Nothing methods ->
-    let klass = Class' name Nothing (mapMethods methods dists env Map.empty)
-     in interpretStmts stmts dists $ initialize (fst name) klass env
+    envS <- liftIO $ initialize "super" literal (child env')
+    methods' <- liftIO $ mapMethods methods dists envS Map.empty
+    let klass = Class' name super' methods'
+    liftIO (initialize (fst name) klass env')
+      >>= interpretStmts stmts dists
+  Class name Nothing methods -> do
+    methods' <- liftIO $ mapMethods methods dists env Map.empty
+    let klass = Class' name Nothing methods'
+    env' <- liftIO $ initialize (fst name) klass env
+    interpretStmts stmts dists env'
 
-interpretFunction :: Stmt -> Distances -> Env -> (Literal, String)
-interpretFunction (Function name params stmts') dists closure = do
+interpretFunction :: Stmt -> Distances -> Env -> IO (String, Literal)
+interpretFunction (Function name params body) dists closure = do
   let callable args env =
-        let envF = foldr (uncurry initialize) (child env) (zip (map fst params) args)
-         in runExceptT (interpretStmts stmts' dists envF)
-   in (Function' name callable (length params) closure, fst name)
+        foldrM (uncurry initialize) (child env) (zip (map fst params) args)
+          >>= runExceptT . interpretStmts body dists
+  pure (fst name, Function' name callable (length params) closure)
 interpretFunction _ _ _ = undefined
 
-mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String Literal -> Map.Map String Literal
-mapMethods [] _ _ mmap = mmap
-mapMethods (mthd : mthds) dists closure mmap =
-  let (fun, fname) = interpretFunction mthd dists closure
-      mmap' = Map.insert fname fun mmap
-   in mapMethods mthds dists closure mmap'
+mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String Literal -> IO (Map.Map String Literal)
+mapMethods [] _ _ mthds = pure mthds
+mapMethods (m : ms) dists closure mthds = do
+  (fun, name) <- interpretFunction m dists closure
+  mapMethods ms dists closure (Map.insert fun name mthds)
 
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 evaluate (Literal lit) _ env = except $ Right (lit, env)
 evaluate (Grouping expr) dists env = evaluate expr dists env
-evaluate (Variable var) dists env = except $ getAt var dists env <&> (,env)
+evaluate (Variable var) dists env = ExceptT $ liftIO (getAt var dists env) <&> fmap (,env)
 evaluate (Assignment var expr) dists env = do
   (lit, env') <- evaluate expr dists env
-  except $ getDistance var dists >>= assignAt var lit `flip` env' <&> (lit,)
+  dist <- except $ getDistance var dists
+  result <- liftIO $ assignAt var lit dist env'
+  except $ result <&> (lit,)
 evaluate (Unary op right) dists env = do
   (r, envR) <- evaluate right dists env
   except $ visitUnary op r <&> (,envR)
@@ -94,72 +105,74 @@ evaluate (Call callee args) dists env = do
   let closure = case callee' of
         Function' _ _ _ clr -> clr
         _                   -> env
-  (args', closure') <- foldM evalArg ([], closure) args
-  visitCall (snd callee) callee' args' closure' <&> (,env')
+  foldlM evalArg ([], closure) args
+    >>= uncurry (visitCall (snd callee) callee')
+    <&> (,env')
 evaluate (Get expr prop) dists env = do
   (inst, envI) <- evaluate expr dists env
-  except $ case inst of
+  case inst of
     Instance' _ super props -> case Map.lookup (fst prop) props of
       Just lit -> case lit of
-        Function' name fn arity closure ->
-          let closure' = initialize "this" inst $ child closure
-              bound = Function' name fn arity closure'
-           in Right (bound, envI)
-        _ -> Right (lit, envI)
+        Function' name fn arity closure -> do
+          closure' <- liftIO $ initialize "this" inst (child closure)
+          pure (Function' name fn arity closure', envI)
+        _ -> pure (lit, envI)
       Nothing -> superLookup super prop inst envI
-    _ -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
+    _ -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
 evaluate (Set expr prop expr') dists env = do
   (inst, envI) <- evaluate expr dists env
   (lit, envL) <- evaluate expr' dists envI
-  except $ do
-    inst' <- case inst of
-      Instance' name super props -> let props' = Map.insert (fst prop) lit props in Right (Instance' name super props')
-      _                          -> Left $ RuntimeError "Only instances have properties/methods" `uncurry` prop
-    env' <- case expr of
-      Variable var -> getDistance var dists >>= assignAt var inst' `flip` envL
-      This pos     -> assignAt ("this", pos) inst' 1 envL
-      _            -> pure envL
-    Right (inst', env')
-evaluate (This pos) dists env = except $ getAt ("this", pos) dists env <&> (,env)
-evaluate (Super pos mthd) dists env = except $ do
-  super <- getAt ("super", pos) dists env
-  inst <- getHere ("this", pos) $ parent env
+  inst' <- case inst of
+    Instance' name super props -> pure (Instance' name super (Map.insert (fst prop) lit props))
+    _                          -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
+  env' <- case expr of
+    Variable var -> except (getDistance var dists) >>= liftIO . flip (assignAt var inst') envL >>= ExceptT . pure
+    This pos     -> liftIO (assignAt ("this", pos) inst' 1 envL) >>= ExceptT . pure
+    _            -> pure envL
+  pure (inst', env')
+evaluate (This pos) dists env = ExceptT $ liftIO $ getAt ("this", pos) dists env <&> fmap (,env)
+evaluate (Super pos mthd) dists env = do
+  super <- ExceptT $ getAt ("super", pos) dists env
+  inst <- ExceptT $ getHere ("this", pos) $ parent env
   methods <- case super of
-    Class' _ _ methods -> Right methods
-    _                  -> Left $ RuntimeError "Super must refer to a class" "super" pos
+    Class' _ _ methods -> pure methods
+    _                  -> throwE $ RuntimeError "Super must refer to a class" "super" pos
   case Map.lookup (fst mthd) methods of
-    Just (Function' name fn arity closure) ->
-      let closure' = initialize "this" inst $ child closure
-          bound = Function' name fn arity closure'
-       in Right (bound, env)
-    _ -> Left $ RuntimeError "Undefined method" `uncurry` mthd
+    Just (Function' name fn arity closure) -> do
+      closure' <- liftIO $ initialize "this" inst (child closure)
+      let bound = Function' name fn arity closure'
+      pure (bound, env)
+    _ -> throwE $ RuntimeError "Undefined method" `uncurry` mthd
 
-superLookup :: Maybe Literal -> String' -> Literal -> Env -> Either RuntimeError (Literal, Env)
+superLookup :: Maybe Literal -> String' -> Literal -> Env -> ExceptT RuntimeError IO (Literal, Env)
 superLookup (Just (Class' _ super props)) prop inst envI = case Map.lookup (fst prop) props of
   Just lit -> case lit of
-    Function' name fn arity closure ->
-      let closure' = initialize "this" inst $ child closure
-          bound = Function' name fn arity closure'
-       in Right (bound, envI)
-    _ -> Right (lit, initialize "this" inst $ child envI)
+    Function' name fn arity closure -> do
+      closure' <- liftIO $ initialize "this" inst (child closure)
+      let bound = Function' name fn arity closure'
+      pure (bound, envI)
+    _ -> liftIO $ initialize "this" inst (child envI) <&> (lit,)
   Nothing -> superLookup super prop inst envI
-superLookup Nothing prop _ _ = Left $ RuntimeError "Undefined property/method" `uncurry` prop
-superLookup _ _ _ _ = undefined
+superLookup Nothing prop _ _ = throwE $ RuntimeError "Undefined property/method" `uncurry` prop
+superLookup _ _ _ _ = error "superLookup: unexpected non-class super literal"
 
 visitCall :: (Int, Int) -> Literal -> [Literal] -> Env -> ExceptT RuntimeError IO Literal
 visitCall _ (Function' name fun arity _) args closure
   | length args == arity = ExceptT $ fmap fst <$> fun args closure
   | otherwise = throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
-visitCall _ (Class' name super methods) args closure =
+visitCall _ (Class' name super methods) args closure = do
   let instance' = Instance' name super methods
-   in case Map.lookup "init" methods of
-        Just (Function' _ initr arity _) | length args == arity -> ExceptT $ do
-          result <- initr args (initialize "this" instance' closure)
-          pure $ result >>= getHere ("this", snd name) . parent . snd
-        Nothing | null args -> pure instance'
-        Just (Function' _ _ arity _) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
-        Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name
-        _ -> throwE $ RuntimeError "Invalid init in class defn" `uncurry` name
+  case Map.lookup "init" methods of
+    Just (Function' _ initr arity _)
+      | length args == arity ->
+          liftIO (initialize "this" instance' closure)
+            >>= (liftIO . initr args)
+            >>= ExceptT . pure
+            >>= (ExceptT . getHere ("this", snd name) . parent . snd)
+    Nothing | null args -> pure instance'
+    Just (Function' _ _ arity _) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
+    Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name
+    _ -> throwE $ RuntimeError "Invalid init in class defn" `uncurry` name
 visitCall pos lit _ _ = throwE $ RuntimeError "Calling non-function/non-class" (show lit) pos
 
 visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)

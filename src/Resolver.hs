@@ -20,7 +20,7 @@ data ClassType = NonC | Sup | Sub
 type State = (FunctionType, ClassType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
+resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [])
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
@@ -94,7 +94,7 @@ resolveLocal name state
       Left $ ResolveError "Can't read local variable in own init" `uncurry` name
 resolveLocal name state = Right $ case calcDistance (fst name) (fth4 state) of
   Just dist -> third4 (Map.insert name dist) state
-  Nothing   -> state -- NOTE: undef?
+  Nothing   -> state
 
 -- Quadruples
 
