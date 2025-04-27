@@ -1,81 +1,80 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
 module Environment where
 
-import Data.Map     as Map
+import Control.Monad    ((>=>))
+import Data.Functor     (($>))
+import Data.IORef       (newIORef, readIORef, writeIORef)
+import Data.List        qualified as List
+import Data.Map         qualified as Map
+import System.IO.Unsafe (unsafePerformIO)
 
-import Data.Functor ((<&>))
-import Error        (ResolveError (ResolveError), RuntimeError (RuntimeError))
-import Syntax       (Env (Env), Literal, String')
-
--- data Env = Env (Map String Literal) (Maybe Env)
+import Error            (ResolveError (ResolveError), RuntimeError (RuntimeError))
+import Syntax           (Env (Env), Literal (..), String')
 
 global :: Env
 global = Env Map.empty Nothing
 
+{-# NOINLINE initialize #-}
 initialize :: String -> Literal -> Env -> Env
-initialize name value (Env scope prev) = Env (Map.insert name value scope) prev
+initialize name value (Env scope prev) =
+  let ref = unsafePerformIO (newIORef value)
+      scope' = Map.insert name ref scope
+   in Env scope' prev
 
-getScope :: String' -> Env -> Either RuntimeError Literal
-getScope name (Env scope _) = case Map.lookup (fst name) scope of
-  Just lit -> Right lit
-  Nothing  -> Left $ RuntimeError "Undefined var" `uncurry` name
+getHere :: String' -> Env -> Either RuntimeError Literal
+getHere (var, pos) (Env scope _) =
+  case Map.lookup var scope of
+    Just ref -> Right (unsafePerformIO (readIORef ref))
+    Nothing  -> Left $ RuntimeError "Undefined variable" var pos
 
 getAt :: String' -> Distances -> Env -> Either RuntimeError Literal
-getAt name dists env = getDistance name dists >>= getScope name . ancestor env
+getAt name dists env = getDistance name dists >>= getHere name . ancestor env
 
 assignAt :: String' -> Literal -> Int -> Env -> Either RuntimeError Env
-assignAt (var, _) value 0 (Env scope prev) | Map.member var scope = Right $ Env (Map.insert var value scope) prev
-assignAt name value dist (Env scope (Just prev)) = Env scope . Just <$> assignAt name value (dist - 1) prev
-assignAt (var, pos) _ _ _ = Left $ RuntimeError "Undefined var" var pos
+assignAt (var, pos) value 0 env@(Env scope _)
+  | Just ref <- Map.lookup var scope = unsafePerformIO (writeIORef ref value) `seq` Right env
+  | otherwise = Left $ RuntimeError "Undefined variable" var pos
+assignAt name value d (Env scope (Just up)) = assignAt name value (d - 1) up $> Env scope (Just up)
+assignAt (var, pos) _ _ _ = Left $ RuntimeError "Undefined variable" var pos
 
 child :: Env -> Env
 child env = Env Map.empty (Just env)
 
 parent :: Env -> Env
-parent (Env _ (Just prev)) = prev
-parent env                 = error (show env)
+parent (Env _ (Just enc)) = enc
+parent _                  = undefined
 
 ancestor :: Env -> Int -> Env
-ancestor env 0 = env
-ancestor env d = ancestor (parent env) (d - 1)
+ancestor env 0                = env
+ancestor (Env _ (Just enc)) d = ancestor enc (d - 1)
+ancestor _ _                  = undefined
 
-progenitor :: Env -> Env
-progenitor (Env _ (Just prev)) = progenitor prev
-progenitor env                 = env
-
--- Scope
+--
 
 type Scope = Map.Map String Bool
+type Distances = Map.Map String' Int
 
 begin :: [Scope] -> [Scope]
-begin stack = Map.empty : stack
+begin = (Map.empty :)
 
 declare :: String' -> [Scope] -> Either ResolveError [Scope]
-declare (var, pos) stack = case stack of
-  scope : scopes
-    | not (Map.member var scope) -> Right $ Map.insert var False scope : scopes
-    | otherwise -> Left $ ResolveError "Var already defined" var pos
-  [] -> Right stack
+declare (var, pos) (scope : scopes)
+  | Map.member var scope = Left $ ResolveError "Variable already declared" var pos
+  | otherwise = Right $ Map.insert var False scope : scopes
+declare _ [] = Right []
 
 define :: String -> [Scope] -> [Scope]
-define name stack = case stack of
-  scope : scopes -> Map.insert name True scope : scopes
-  []             -> undefined
+define name (scope : scopes) = Map.insert name True scope : scopes
+define _ []                  = []
 
 declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
-declareDefine name stack = declare name stack <&> define (fst name)
+declareDefine name = declare name >=> Right . (define . fst) name
 
--- Distances
-
-type Distances = Map String' Int
-
-calcDistance :: Int -> String' -> [Scope] -> Maybe Int
-calcDistance dist name stack = case stack of
-  scope : scopes
-    | Map.member (fst name) scope -> Just dist
-    | otherwise -> calcDistance (dist + 1) name scopes
-  [] -> Nothing
+calcDistance :: String -> [Scope] -> Maybe Int
+calcDistance = List.findIndex . Map.member
 
 getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
   Just dist -> Right dist
-  Nothing   -> Left $ RuntimeError "Undefined var" `uncurry` name
+  Nothing   -> Left $ RuntimeError "Unresolved variable" `uncurry` name

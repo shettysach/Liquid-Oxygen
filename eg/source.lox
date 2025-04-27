@@ -1,20 +1,14 @@
-fun add(a, b) {
-    return a + b;
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
 }
 
-print add("Hello ", "World");
-print add(add(1, 2), add(2, 3));
-print "";
-
-var c = 0;
-while (c < 10) print c = c + 1;
-
-print "";
-
-for (var i = 0; i < 10; i = i + 1) print i;
-
-fun notAMethod() {
-  print this;
+class BostonCream < Doughnut {
+  cook() {
+    super.cook();
+    print "Pipe full of custard and coat with chocolate.";
+  }
 }
 
-notAMethod();
+BostonCream().cook();

@@ -1,7 +1,5 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE TupleSections       #-}
-{-# HLINT ignore "Redundant <&>" #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module Resolver where
 
@@ -17,28 +15,27 @@ import Syntax
 
 data FunctionType = NonF | Fun | Mthd | Init
 
-data ClassType = NonC | Super | Sub
+data ClassType = NonC | Sup | Sub
 
-type State = (FunctionType, Distances, [Scope])
+type State = (FunctionType, ClassType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . snd3 <$> resolveStmts stmts (NonF, Map.empty, [Map.empty])
+resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
-resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
+resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
   Expr expr -> resolveExpr expr state >>= resolveStmts stmts
   Var name (Just expr) ->
     declare name stack
-      >>= resolveExpr expr . (ftype,dists,)
-      >>= resolveStmts stmts . third3 (define $ fst name)
-  Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,dists,)
+      >>= resolveExpr expr . (ftype,ctype,dists,)
+      >>= resolveStmts stmts . fourth4 (define $ fst name)
+  Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,ctype,dists,)
   Return mExpr | NonF <- ftype -> Left $ ResolveError "Top level return" "return" $ snd mExpr
   Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" "return" $ snd mExpr
-  Return mExpr -> case fst mExpr of
-    Just expr -> resolveExpr expr state >>= resolveStmts stmts
-    Nothing   -> resolveStmts stmts state
-  Block stmts' -> resolveStmts stmts' (ftype, dists, begin stack) >>= resolveStmts stmts . third3 tail
+  Return (Just expr, _) -> resolveExpr expr state >>= resolveStmts stmts
+  Return (Nothing, _) -> resolveStmts stmts state
+  Block stmts' -> resolveStmts stmts' (fourth4 begin state) >>= resolveStmts stmts . fourth4 tail
   Print expr -> resolveExpr expr state >>= resolveStmts stmts
   If cond thenStmt elseStmt ->
     resolveExpr cond state >>= resolveStmts [thenStmt] >>= case elseStmt of
@@ -49,27 +46,23 @@ resolveStmts (stmt : stmts) state@(ftype, dists, stack) = case stmt of
       >>= resolveStmts [stmt']
       >>= resolveStmts stmts
   Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts
-  Class name (Just (Variable name')) _
-    | fst name == fst name' ->
-        Left $ ResolveError "Can't inherit from self" `uncurry` name'
+  Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" `uncurry` name'
   Class name (Just super) methods ->
     declareDefine name stack
-      >>= resolveExpr super . (ftype,dists,)
-      <&> third3 (define "this" . begin)
-      >>= foldrM resolveMethod `flip` methods
-      >>= resolveStmts stmts . third3 tail
+      >>= resolveExpr super . (ftype,Sub,dists,)
+      >>= (foldrM resolveMethod `flip` methods) . fourth4 (define "this" . begin . define "super" . begin)
+      >>= resolveStmts stmts . second4 (const ctype) . fourth4 (tail . tail)
   Class name Nothing methods ->
     declareDefine name stack
-      <&> (ftype,dists,) . define "this" . begin
-      >>= foldrM resolveMethod `flip` methods
-      >>= resolveStmts stmts . third3 tail
+      >>= (foldrM resolveMethod `flip` methods) . (ftype,Sup,dists,) . define "this" . begin
+      >>= resolveStmts stmts . fourth4 tail
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
-resolveFunction (Function name params stmts') ntype (ftype, dists, stack) = do
+resolveFunction (Function name params stmts') ntype (ftype, ctype, dists, stack) =
   declareDefine name stack
     >>= (foldrM declareDefine `flip` params) . begin
-    >>= resolveStmts stmts' . (ntype,dists,)
-    <&> first3 (const ftype) . third3 tail
+    >>= resolveStmts stmts' . (ntype,ctype,dists,)
+    <&> first4 (const ftype) . fourth4 tail
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
@@ -77,42 +70,54 @@ resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
 resolveMethod mthd                            = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
-resolveExpr (Literal _) state             = Right state
-resolveExpr (Grouping expr) state         = resolveExpr expr state
-resolveExpr (Variable name) state         = resolveLocal name state
-resolveExpr (Assignment name expr) state  = resolveExpr expr state >>= resolveLocal name
-resolveExpr (Unary _ right) state         = resolveExpr right state
-resolveExpr (Binary _ left right) state   = resolveExpr left state >>= resolveExpr right
-resolveExpr (Logical _ left right) state  = resolveExpr left state >>= resolveExpr right
-resolveExpr (Call (expr, _) args) state   = resolveExpr expr state >>= foldrM resolveExpr `flip` args
-resolveExpr (Get expr _) state            = resolveExpr expr state
-resolveExpr (Set expr _ expr') state      = resolveExpr expr state >>= resolveExpr expr'
-resolveExpr (This pos) state@(Mthd, _, _) = resolveLocal ("this", pos) state
-resolveExpr (This pos) state@(Init, _, _) = resolveLocal ("this", pos) state
-resolveExpr (This pos) _                  = Left $ ResolveError "Used `this` out of class" "this" pos
+resolveExpr (Literal _) state                = Right state
+resolveExpr (Grouping expr) state            = resolveExpr expr state
+resolveExpr (Variable name) state            = resolveLocal name state
+resolveExpr (Assignment name expr) state     = resolveExpr expr state >>= resolveLocal name
+resolveExpr (Unary _ right) state            = resolveExpr right state
+resolveExpr (Binary _ left right) state      = resolveExpr left state >>= resolveExpr right
+resolveExpr (Logical _ left right) state     = resolveExpr left state >>= resolveExpr right
+resolveExpr (Call (expr, _) args) state      = resolveExpr expr state >>= foldrM resolveExpr `flip` args
+resolveExpr (Get expr _) state               = resolveExpr expr state
+resolveExpr (Set expr _ expr') state         = resolveExpr expr state >>= resolveExpr expr'
+resolveExpr (This pos) state@(Mthd, _, _, _) = resolveLocal ("this", pos) state
+resolveExpr (This pos) state@(Init, _, _, _) = resolveLocal ("this", pos) state
+resolveExpr (This pos) _                     = Left $ ResolveError "Used `this` out of class" "this" pos
+resolveExpr (Super pos _) (_, NonC, _, _)    = Left $ ResolveError "Used `super` out of class" "super" pos
+resolveExpr (Super pos _) (_, Sup, _, _)     = Left $ ResolveError "Used `super` in class without superclass" "super" pos
+resolveExpr (Super pos mthd) state           = resolveLocal ("super", pos) state >>= resolveLocal mthd
 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name state
-  | scope : _ <- thd3 state
+  | scope : _ <- fth4 state
   , Map.lookup (fst name) scope == Just False =
       Left $ ResolveError "Can't read local variable in own init" `uncurry` name
-resolveLocal name state = case calcDistance 0 name (thd3 state) of
-  Just dist -> Right $ second3 (Map.insert name dist) state
-  Nothing   -> Right state
+resolveLocal name state = Right $ case calcDistance (fst name) (fth4 state) of
+  Just dist -> third4 (Map.insert name dist) state
+  Nothing   -> state -- NOTE: undef?
 
--- https://hackage.haskell.org/package/extra-1.8/docs/Data-Tuple-Extra.html
+-- Quadruples
 
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
+fst4 :: (a, b, c, d) -> a
+fst4 ~(a, _, _, _) = a
 
-thd3 :: (a, b, c) -> c
-thd3 (_, _, c) = c
+snd4 :: (a, b, c, d) -> b
+snd4 ~(_, b, _, _) = b
 
-first3 :: (a -> a') -> (a, b, c) -> (a', b, c)
-first3 f ~(a, b, c) = (f a, b, c)
+thd4 :: (a, b, c, d) -> c
+thd4 ~(_, _, c, _) = c
 
-second3 :: (b -> b') -> (a, b, c) -> (a, b', c)
-second3 f ~(a, b, c) = (a, f b, c)
+fth4 :: (a, b, c, d) -> d
+fth4 ~(_, _, _, d) = d
 
-third3 :: (c -> c') -> (a, b, c) -> (a, b, c')
-third3 f ~(a, b, c) = (a, b, f c)
+first4 :: (a -> a') -> (a, b, c, d) -> (a', b, c, d)
+first4 f ~(a, b, c, d) = (f a, b, c, d)
+
+second4 :: (b -> b') -> (a, b, c, d) -> (a, b', c, d)
+second4 f ~(a, b, c, d) = (a, f b, c, d)
+
+third4 :: (c -> c') -> (a, b, c, d) -> (a, b, c', d)
+third4 f ~(a, b, c, d) = (a, b, f c, d)
+
+fourth4 :: (d -> d') -> (a, b, c, d) -> (a, b, c, d')
+fourth4 f ~(a, b, c, d) = (a, b, c, f d)

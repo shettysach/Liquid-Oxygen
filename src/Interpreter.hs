@@ -22,15 +22,11 @@ interpretStmts [] _ env = pure (Nil, env)
 interpretStmts (stmt : stmts) dists env = case stmt of
   Expr expr -> evaluate expr dists env >>= interpretStmts stmts dists . snd
   Var var (Just expr) -> evaluate expr dists env >>= interpretStmts stmts dists . uncurry (initialize $ fst var)
-  Var var Nothing -> interpretStmts stmts dists (initialize (fst var) Nil env)
-  Return mExpr -> case fst mExpr of
-    Just expr -> evaluate expr dists env <&> second parent
-    Nothing   -> evaluate (Literal Nil) dists env <&> second parent
+  Var var Nothing -> interpretStmts stmts dists $ initialize (fst var) Nil env
+  Return (Just expr, _) -> evaluate expr dists env <&> second parent
+  Return (Nothing, _) -> evaluate (Literal Nil) dists env <&> second parent
   Block stmts' -> interpretStmts stmts' dists (child env) >>= interpretStmts stmts dists . parent . snd
-  Print expr -> do
-    (lit, env') <- evaluate expr dists env
-    (liftIO . print) lit
-    interpretStmts stmts dists env'
+  Print expr -> evaluate expr dists env >>= liftA2 (>>) (liftIO . print . fst) (interpretStmts stmts dists . snd)
   If cond thenStmt elseStmt -> do
     (cond', env') <- evaluate cond dists env
     if isTruthy cond'
@@ -51,15 +47,15 @@ interpretStmts (stmt : stmts) dists env = case stmt of
      in interpretStmts stmts dists closure
   Class name (Just super) methods -> do
     (literal, env') <- evaluate super dists env
-    super' <- case (literal, super) of
-      (Class'{}, _)     -> pure $ Just literal
-      (_, Variable var) -> throwE $ RuntimeError "Superclass must be class" `uncurry` var
-      _                 -> undefined
-    let klass = Class' name super' (mapMethods methods dists env' Map.empty)
-     in interpretStmts stmts dists (initialize (fst name) klass env')
+    super' <- case literal of
+      Class'{} -> pure $ Just literal
+      _        -> throwE $ RuntimeError "Superclass must be a class" `uncurry` name
+    let envS = initialize "super" literal $ child env'
+    let klass = Class' name super' (mapMethods methods dists envS Map.empty)
+    interpretStmts stmts dists $ initialize (fst name) klass env'
   Class name Nothing methods ->
     let klass = Class' name Nothing (mapMethods methods dists env Map.empty)
-     in interpretStmts stmts dists (initialize (fst name) klass env)
+     in interpretStmts stmts dists $ initialize (fst name) klass env
 
 interpretFunction :: Stmt -> Distances -> Env -> (Literal, String)
 interpretFunction (Function name params stmts') dists closure = do
@@ -124,9 +120,19 @@ evaluate (Set expr prop expr') dists env = do
       This pos     -> assignAt ("this", pos) inst' 1 envL
       _            -> pure envL
     Right (inst', env')
-evaluate (This pos) dists env =
-  let this = ("this", pos)
-   in except $ getAt this dists env <&> (,env)
+evaluate (This pos) dists env = except $ getAt ("this", pos) dists env <&> (,env)
+evaluate (Super pos mthd) dists env = except $ do
+  super <- getAt ("super", pos) dists env
+  inst <- getHere ("this", pos) $ parent env
+  methods <- case super of
+    Class' _ _ methods -> Right methods
+    _                  -> Left $ RuntimeError "Super must refer to a class" "super" pos
+  case Map.lookup (fst mthd) methods of
+    Just (Function' name fn arity closure) ->
+      let closure' = initialize "this" inst $ child closure
+          bound = Function' name fn arity closure'
+       in Right (bound, env)
+    _ -> Left $ RuntimeError "Undefined method" `uncurry` mthd
 
 superLookup :: Maybe Literal -> String' -> Literal -> Env -> Either RuntimeError (Literal, Env)
 superLookup (Just (Class' _ super props)) prop inst envI = case Map.lookup (fst prop) props of
@@ -137,7 +143,7 @@ superLookup (Just (Class' _ super props)) prop inst envI = case Map.lookup (fst 
        in Right (bound, envI)
     _ -> Right (lit, initialize "this" inst $ child envI)
   Nothing -> superLookup super prop inst envI
-superLookup Nothing prop _ _ = Left $ uncurry (RuntimeError "Undefined property/method") prop
+superLookup Nothing prop _ _ = Left $ RuntimeError "Undefined property/method" `uncurry` prop
 superLookup _ _ _ _ = undefined
 
 visitCall :: (Int, Int) -> Literal -> [Literal] -> Env -> ExceptT RuntimeError IO Literal
@@ -149,7 +155,7 @@ visitCall _ (Class' name super methods) args closure =
    in case Map.lookup "init" methods of
         Just (Function' _ initr arity _) | length args == arity -> ExceptT $ do
           result <- initr args (initialize "this" instance' closure)
-          pure $ result >>= getScope ("this", snd name) . parent . snd
+          pure $ result >>= getHere ("this", snd name) . parent . snd
         Nothing | null args -> pure instance'
         Just (Function' _ _ arity _) -> throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
         Nothing -> throwE $ RuntimeError "Class const takes no arguments" `uncurry` name
@@ -158,16 +164,16 @@ visitCall pos lit _ _ = throwE $ RuntimeError "Calling non-function/non-class" (
 
 visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 visitLogical op left right dists env = do
-  (left', env') <- evaluate left dists env
+  result@(left', env') <- evaluate left dists env
   case fst op of
-    Or | isTruthy left'          -> pure (left', env')
-    And | (not . isTruthy) left' -> pure (left', env')
+    Or | isTruthy left'          -> pure result
+    And | not . isTruthy $ left' -> pure result
     _                            -> evaluate right dists env'
 
 visitUnary :: UnaryOp' -> Literal -> Either RuntimeError Literal
-visitUnary (Minus', _) (Number' n) = Right $ Number' $ -n
+visitUnary (Minus', _) (Number' n) = Right . Number' . negate $ n
 visitUnary (Minus', pos) _         = Left $ RuntimeError "Invalid operand" (show Minus') pos
-visitUnary _ right                 = (Right . Bool' . not . isTruthy) right
+visitUnary _ right                 = Right . Bool' . not . isTruthy $ right
 
 visitBinary :: BinaryOp' -> Literal -> Literal -> Either RuntimeError Literal
 visitBinary op left right

@@ -1,7 +1,9 @@
 module Syntax where
 
-import Data.Map (Map)
-import Error    (RuntimeError)
+import Data.IORef (IORef)
+import Data.Map   (Map)
+
+import Error      (RuntimeError)
 
 data Stmt
   = Expr Expr
@@ -26,6 +28,7 @@ data Expr
   | Grouping Expr
   | Get Expr String'
   | Set Expr String' Expr
+  | Super Position String'
   | This Position
   deriving (Show)
 
@@ -38,8 +41,7 @@ data Literal
   | Instance' String' (Maybe Literal) (Map String Literal)
   | Nil
 
-data Env = Env (Map String Literal) (Maybe Env)
-  deriving (Show)
+data Env = Env (Map String (IORef Literal)) (Maybe Env)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 

@@ -279,6 +279,10 @@ primary (t : ts) = case fst t of
   T.String' s -> Right (Literal $ S.String' s, ts)
   T.Identifier i -> Right (Variable (i, snd t), ts)
   T.This -> Right (S.This (snd t), ts)
+  T.Super -> case ts of
+    (T.Dot, _) : (T.Identifier name, pos) : ts' -> Right (S.Super (snd t) (name, pos), ts')
+    (T.Dot, _) : t' : _                         -> Left $ ParseError "Expected superclass method name after '.'" t'
+    _                                           -> Left $ ParseError "Expected '.' after 'super'" (head ts)
   T.LeftParen -> do
     (expr, rest) <- expression ts
     case rest of

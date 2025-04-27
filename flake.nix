@@ -1,5 +1,5 @@
 {
-  description = "Basic Haskell";
+  description = " Haskell";
 
   inputs = {
     # nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
