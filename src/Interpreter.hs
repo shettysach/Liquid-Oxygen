@@ -18,7 +18,7 @@ import Error                      (RuntimeError (RuntimeError))
 import Syntax
 
 interpret :: ([Stmt], Distances) -> IO (Either RuntimeError ())
-interpret (statements, distances) = void <$> runExceptT (interpretStmts statements distances global)
+interpret (statements, distances) = global >>= runExceptT . interpretStmts statements distances <&> void
 
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
@@ -31,7 +31,10 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Var var Nothing -> liftIO (initialize (fst var) Nil env) >>= interpretStmts stmts dists
   Return (Just expr, _) -> evaluate expr dists env <&> second parent
   Return (Nothing, _) -> evaluate (Literal Nil) dists env <&> second parent
-  Block stmts' -> interpretStmts stmts' dists (child env) >>= interpretStmts stmts dists . parent . snd
+  Block stmts' ->
+    liftIO (child env)
+      >>= interpretStmts stmts' dists
+      >>= interpretStmts stmts dists . parent . snd
   Print expr -> evaluate expr dists env >>= liftA2 (>>) (liftIO . print . fst) (interpretStmts stmts dists . snd)
   If cond thenStmt elseStmt -> do
     (cond', env') <- evaluate cond dists env
@@ -48,7 +51,7 @@ interpretStmts (stmt : stmts) dists env = case stmt of
             else interpretStmts stmts dists envC
      in while env
   Function{} -> mdo
-    closure <- lift $ initialize name fun env
+    closure <- lift (initialize name fun env)
     (name, fun) <- lift $ interpretFunction stmt dists closure
     interpretStmts stmts dists closure
   Class name (Just super) methods -> do
@@ -56,7 +59,7 @@ interpretStmts (stmt : stmts) dists env = case stmt of
     super' <- case literal of
       Class'{} -> pure $ Just literal
       _        -> throwE $ RuntimeError "Superclass must be a class" `uncurry` name
-    envS <- liftIO $ initialize "super" literal (child env')
+    envS <- liftIO $ liftIO (child env) >>= initialize "super" literal
     methods' <- liftIO $ mapMethods methods dists envS Map.empty
     let klass = Class' name super' methods'
     liftIO (initialize (fst name) klass env')
@@ -70,7 +73,8 @@ interpretStmts (stmt : stmts) dists env = case stmt of
 interpretFunction :: Stmt -> Distances -> Env -> IO (String, Literal)
 interpretFunction (Function name params body) dists closure = do
   let callable args env =
-        foldrM (uncurry initialize) (child env) (zip (map fst params) args)
+        child env
+          >>= foldrM (uncurry initialize) `flip` zip (map fst params) args
           >>= runExceptT . interpretStmts body dists
   pure (fst name, Function' name callable (length params) closure)
 interpretFunction _ _ _ = undefined
@@ -88,8 +92,8 @@ evaluate (Variable var) dists env = ExceptT $ liftIO (getAt var dists env) <&> f
 evaluate (Assignment var expr) dists env = do
   (lit, env') <- evaluate expr dists env
   dist <- except $ getDistance var dists
-  result <- liftIO $ assignAt var lit dist env'
-  except $ result <&> (lit,)
+  liftIO (assignAt var lit dist env') >>= except
+  pure (lit, env')
 evaluate (Unary op right) dists env = do
   (r, envR) <- evaluate right dists env
   except $ visitUnary op r <&> (,envR)
@@ -114,8 +118,9 @@ evaluate (Get expr prop) dists env = do
     Instance' _ super props -> case Map.lookup (fst prop) props of
       Just lit -> case lit of
         Function' name fn arity closure -> do
-          closure' <- liftIO $ initialize "this" inst (child closure)
-          pure (Function' name fn arity closure', envI)
+          closure' <- liftIO $ child closure >>= initialize "this" inst
+          let fun = Function' name fn arity closure'
+          pure (fun, envI)
         _ -> pure (lit, envI)
       Nothing -> superLookup super prop inst envI
     _ -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
@@ -123,13 +128,17 @@ evaluate (Set expr prop expr') dists env = do
   (inst, envI) <- evaluate expr dists env
   (lit, envL) <- evaluate expr' dists envI
   inst' <- case inst of
-    Instance' name super props -> pure (Instance' name super (Map.insert (fst prop) lit props))
-    _                          -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
-  env' <- case expr of
-    Variable var -> except (getDistance var dists) >>= liftIO . flip (assignAt var inst') envL >>= ExceptT . pure
-    This pos     -> liftIO (assignAt ("this", pos) inst' 1 envL) >>= ExceptT . pure
-    _            -> pure envL
-  pure (inst', env')
+    Instance' name super props ->
+      pure (Instance' name super (Map.insert (fst prop) lit props))
+    _ -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
+  case expr of
+    Variable var -> do
+      dist <- except (getDistance var dists)
+      liftIO (assignAt var inst' dist envL) >>= except
+    This pos ->
+      liftIO (assignAt ("this", pos) inst' 1 envL) >>= except
+    _ -> pure ()
+  pure (inst', envL)
 evaluate (This pos) dists env = ExceptT $ liftIO $ getAt ("this", pos) dists env <&> fmap (,env)
 evaluate (Super pos mthd) dists env = do
   super <- ExceptT $ getAt ("super", pos) dists env
@@ -139,7 +148,7 @@ evaluate (Super pos mthd) dists env = do
     _                  -> throwE $ RuntimeError "Super must refer to a class" "super" pos
   case Map.lookup (fst mthd) methods of
     Just (Function' name fn arity closure) -> do
-      closure' <- liftIO $ initialize "this" inst (child closure)
+      closure' <- liftIO $ child closure >>= initialize "this" inst
       let bound = Function' name fn arity closure'
       pure (bound, env)
     _ -> throwE $ RuntimeError "Undefined method" `uncurry` mthd
@@ -148,10 +157,10 @@ superLookup :: Maybe Literal -> String' -> Literal -> Env -> ExceptT RuntimeErro
 superLookup (Just (Class' _ super props)) prop inst envI = case Map.lookup (fst prop) props of
   Just lit -> case lit of
     Function' name fn arity closure -> do
-      closure' <- liftIO $ initialize "this" inst (child closure)
+      closure' <- liftIO $ child closure >>= initialize "this" inst
       let bound = Function' name fn arity closure'
       pure (bound, envI)
-    _ -> liftIO $ initialize "this" inst (child envI) <&> (lit,)
+    _ -> liftIO $ child envI >>= initialize "this" inst <&> (lit,)
   Nothing -> superLookup super prop inst envI
 superLookup Nothing prop _ _ = throwE $ RuntimeError "Undefined property/method" `uncurry` prop
 superLookup _ _ _ _ = error "superLookup: unexpected non-class super literal"

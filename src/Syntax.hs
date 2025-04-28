@@ -41,7 +41,7 @@ data Literal
   | Instance' String' (Maybe Literal) (Map String Literal)
   | Nil
 
-data Env = Env (Map String (IORef Literal)) (Maybe Env)
+data Env = Env (IORef (Map String Literal)) (Maybe Env)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 

@@ -8,7 +8,8 @@ fun makeCounter() {
   return count;
 }
 
-var counter = makeCounter();
+var counter = 0;
+counter = makeCounter();
 counter();
 counter();
 counter();

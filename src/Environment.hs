@@ -3,41 +3,22 @@
 module Environment where
 
 import Control.Monad ((>=>))
-import Data.Functor  (($>), (<&>))
-import Data.IORef    (newIORef, readIORef, writeIORef)
+import Data.Functor  ((<&>))
+import Data.IORef    (atomicModifyIORef', modifyIORef, newIORef, readIORef)
 import Data.List     qualified as List
 import Data.Map      qualified as Map
 
 import Error         (ResolveError (ResolveError), RuntimeError (RuntimeError))
 import Syntax        (Env (Env), Literal, String')
 
-global :: Env
-global = Env Map.empty Nothing
+newEnv :: Maybe Env -> IO Env
+newEnv enc = newIORef Map.empty <&> Env `flip` enc
 
-initialize :: String -> Literal -> Env -> IO Env
-initialize name value (Env scope prev) = do
-  ref <- newIORef value
-  let scope' = Map.insert name ref scope
-  pure $ Env scope' prev
+global :: IO Env
+global = newEnv Nothing
 
-getHere :: String' -> Env -> IO (Either RuntimeError Literal)
-getHere (var, pos) (Env scope _) =
-  case Map.lookup var scope of
-    Just ref -> readIORef ref <&> Right
-    Nothing  -> pure . Left $ RuntimeError "Undefined variable" var pos
-
-getAt :: String' -> Distances -> Env -> IO (Either RuntimeError Literal)
-getAt name dists env = getHere name $ case getDistance name dists of
-  Right dist -> ancestor env dist
-  Left _     -> progenitor env
-
-assignAt :: String' -> Literal -> Int -> Env -> IO (Either RuntimeError Env)
-assignAt name value 0 env@(Env scope _) | Just ref <- Map.lookup (fst name) scope = writeIORef ref value $> Right env
-assignAt name value d (Env scope (Just enc)) = assignAt name value (d - 1) enc $> pure (Env scope (Just enc))
-assignAt (var, pos) _ _ _ = pure $ Left $ RuntimeError "Undefined variable" var pos
-
-child :: Env -> Env
-child env = Env Map.empty (Just env)
+child :: Env -> IO Env
+child env = newEnv (Just env)
 
 parent :: Env -> Env
 parent (Env _ (Just enc)) = enc
@@ -52,6 +33,31 @@ progenitor :: Env -> Env
 progenitor (Env _ (Just enc)) = progenitor enc
 progenitor env                = env
 
+initialize :: String -> Literal -> Env -> IO Env
+initialize name value env@(Env scopeRef _) = modifyIORef scopeRef (Map.insert name value) >> pure env
+
+getHere :: String' -> Env -> IO (Either RuntimeError Literal)
+getHere (name, pos) (Env scopeRef _) = do
+  scope <- readIORef scopeRef
+  case Map.lookup name scope of
+    Just val -> pure . Right $ val
+    Nothing  -> pure . Left $ RuntimeError "Undefined variable" name pos
+
+getAt :: String' -> Distances -> Env -> IO (Either RuntimeError Literal)
+getAt name dists env = getHere name $ case getDistance name dists of
+  Right dist -> ancestor env dist
+  Left _     -> progenitor env
+
+assignAt :: String' -> Literal -> Int -> Env -> IO (Either RuntimeError ())
+assignAt name value 0 (Env scopeRef _) =
+  let assign scope =
+        if Map.member (fst name) scope
+          then (Map.insert (fst name) value scope, Right ())
+          else (scope, Left $ RuntimeError "Undefined variable" `uncurry` name)
+   in atomicModifyIORef' scopeRef assign
+assignAt name value d (Env _ (Just enc)) = assignAt name value (d - 1) enc
+assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" `uncurry` name
+
 --
 
 type Scope = Map.Map String Bool
@@ -63,11 +69,11 @@ begin = (Map.empty :)
 declare :: String' -> [Scope] -> Either ResolveError [Scope]
 declare (name, pos) (scope : _) | Map.member name scope = Left $ ResolveError "Variable already declared" name pos
 declare (name, _) (scope : scopes) = Right $ Map.insert name False scope : scopes
-declare _ [] = pure []
+declare _ _ = undefined
 
 define :: String -> [Scope] -> [Scope]
 define name (scope : scopes) = Map.insert name True scope : scopes
-define _ []                  = []
+define _ _                   = undefined
 
 declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
 declareDefine name = declare name >=> pure . (define . fst) name

@@ -20,7 +20,7 @@ data ClassType = NonC | Sup | Sub
 type State = (FunctionType, ClassType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [])
+resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
@@ -38,9 +38,11 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
   Block stmts' -> resolveStmts stmts' (fourth4 begin state) >>= resolveStmts stmts . fourth4 tail
   Print expr -> resolveExpr expr state >>= resolveStmts stmts
   If cond thenStmt elseStmt ->
-    resolveExpr cond state >>= resolveStmts [thenStmt] >>= case elseStmt of
-      Just stmt' -> resolveStmts [stmt'] >=> resolveStmts stmts
-      Nothing    -> resolveStmts stmts
+    resolveExpr cond state
+      >>= resolveStmts [thenStmt]
+      >>= case elseStmt of
+        Just stmt' -> resolveStmts [stmt'] >=> resolveStmts stmts
+        Nothing    -> resolveStmts stmts
   While cond stmt' ->
     resolveExpr cond state
       >>= resolveStmts [stmt']
@@ -99,25 +101,25 @@ resolveLocal name state = Right $ case calcDistance (fst name) (fth4 state) of
 -- Quadruples
 
 fst4 :: (a, b, c, d) -> a
-fst4 ~(a, _, _, _) = a
+fst4 (a, _, _, _) = a
 
 snd4 :: (a, b, c, d) -> b
-snd4 ~(_, b, _, _) = b
+snd4 (_, b, _, _) = b
 
 thd4 :: (a, b, c, d) -> c
-thd4 ~(_, _, c, _) = c
+thd4 (_, _, c, _) = c
 
 fth4 :: (a, b, c, d) -> d
-fth4 ~(_, _, _, d) = d
+fth4 (_, _, _, d) = d
 
 first4 :: (a -> a') -> (a, b, c, d) -> (a', b, c, d)
-first4 f ~(a, b, c, d) = (f a, b, c, d)
+first4 f (a, b, c, d) = (f a, b, c, d)
 
 second4 :: (b -> b') -> (a, b, c, d) -> (a, b', c, d)
-second4 f ~(a, b, c, d) = (a, f b, c, d)
+second4 f (a, b, c, d) = (a, f b, c, d)
 
 third4 :: (c -> c') -> (a, b, c, d) -> (a, b, c', d)
-third4 f ~(a, b, c, d) = (a, b, f c, d)
+third4 f (a, b, c, d) = (a, b, f c, d)
 
 fourth4 :: (d -> d') -> (a, b, c, d) -> (a, b, c, d')
-fourth4 f ~(a, b, c, d) = (a, b, c, f d)
+fourth4 f (a, b, c, d) = (a, b, c, f d)

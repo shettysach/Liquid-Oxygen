@@ -24,9 +24,9 @@ chainIO _ Nothing = pure Nothing
 chainIO f (Just x) =
   case f x of
     Left l  -> hPrint stderr l >> pure Nothing
-    Right r -> pure (pure r)
+    Right r -> pure $ pure r
 
-endIO :: (Show l) => (a -> IO (Either l r)) -> Maybe a -> IO ()
+endIO :: (Show l) => (a -> IO (Either l ())) -> Maybe a -> IO ()
 endIO _ Nothing = return ()
 endIO f (Just x) =
   f x >>= \case

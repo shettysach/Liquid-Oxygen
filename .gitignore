@@ -1,4 +1,5 @@
 .direnv/
 lox
+bench/
 dist-newstyle/
 scratch.txt

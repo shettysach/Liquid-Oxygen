@@ -1,0 +1,7 @@
+fun x(a) {
+    return a + a * a;
+}
+
+var a = 10;
+a = x(a); 
+print a;
