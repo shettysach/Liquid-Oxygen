@@ -16,6 +16,7 @@ executable liquid-oxygen
       Error
       Interpreter
       Parser
+      Repl
       Resolver
       Scanner
       Syntax

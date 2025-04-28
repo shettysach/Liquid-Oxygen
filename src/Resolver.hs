@@ -22,6 +22,11 @@ type State = (FunctionType, ClassType, Distances, [Scope])
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
 resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
 
+resolveRepl :: [Stmt] -> [Scope] -> Either ResolveError ([Stmt], Distances, [Scope])
+resolveRepl stmts scopes = do
+  state <- resolveStmts stmts (NonF, NonC, Map.empty, scopes)
+  pure (stmts, thd4 state, fth4 state)
+
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
 resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of

@@ -20,6 +20,9 @@ import Syntax
 interpret :: ([Stmt], Distances) -> IO (Either RuntimeError ())
 interpret (statements, distances) = global >>= runExceptT . interpretStmts statements distances <&> void
 
+interpretRepl :: ([Stmt], Distances) -> Env -> IO (Either RuntimeError Env)
+interpretRepl (statements, distances) env = fmap snd <$> runExceptT (interpretStmts statements distances env)
+
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
 interpretStmts (stmt : stmts) dists env = case stmt of

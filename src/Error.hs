@@ -12,7 +12,7 @@ data RuntimeError = RuntimeError String String (Int, Int)
 
 instance Show ScanError where
   show (ScanError message lexeme position) =
-    "\nSCAN ERROR : "
+    "SCAN ERROR : "
       ++ message
       ++ "\nLexeme     : "
       ++ lexeme
@@ -21,7 +21,7 @@ instance Show ScanError where
 
 instance Show ParseError where
   show (ParseError message (token, position)) =
-    "\nPARSE ERROR : "
+    "PARSE ERROR : "
       ++ message
       ++ "\nLexeme      : "
       ++ show token
@@ -30,7 +30,7 @@ instance Show ParseError where
 
 instance Show ResolveError where
   show (ResolveError message lexeme position) =
-    "\nRESOLVE ERROR : "
+    "RESOLVE ERROR : "
       ++ message
       ++ "\nLexeme        : "
       ++ lexeme
@@ -39,7 +39,7 @@ instance Show ResolveError where
 
 instance Show RuntimeError where
   show (RuntimeError message lexeme position) =
-    "\nRUNTIME ERROR : "
+    "RUNTIME ERROR : "
       ++ message
       ++ "\nLexeme        : "
       ++ lexeme
