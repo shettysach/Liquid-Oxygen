@@ -61,6 +61,7 @@ assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" `uncurry` 
 --
 
 type Scope = Map.Map String Bool
+
 type Distances = Map.Map String' Int
 
 begin :: [Scope] -> [Scope]

@@ -1,0 +1,23 @@
+class Cell {
+	init() {
+            print "hello";
+	}
+
+}
+
+class Field {
+	init() {
+		this.root = Cell();
+	}
+}
+
+
+
+class Life {
+	init() {
+		this.a = Field();
+	}
+
+}
+
+var l = Life();

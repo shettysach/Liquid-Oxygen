@@ -3,61 +3,60 @@
 
 module Repl where
 
-import Data.Map    qualified as Map
-import System.IO   (hFlush, hPrint, stderr, stdout)
+import Control.Monad.Trans.Except (runExceptT)
+import Data.Map                   qualified as Map
+import System.IO                  (hFlush, hPrint, stderr, stdout)
 
-import Environment (Scope, global)
-import Error       (ScanError)
-import Interpreter (interpretRepl)
-import Parser      (parse)
-import Resolver    (resolveRepl)
-import Scanner     (scan)
-import Syntax      (Env)
-import Token       as T
+import Environment                (Scope, global)
+import Error                      (ScanError)
+import Interpreter                (evaluate, replInterpret)
+import Parser                     (expression, parse)
+import Resolver                   (replResolve)
+import Scanner                    (scan)
+import Syntax                     as S
+import Token                      as T
 
-repl :: IO ()
-repl = do
+startRepl :: IO ()
+startRepl = do
   putStrLn "Welcome to the REPL. Type `quit` to quit."
-  global >>= repl' [Map.empty]
+  global >>= repl [Map.empty]
+  putStrLn "Exiting the REPL."
 
-repl' :: [Scope] -> Env -> IO ()
-repl' scopes env = do
+repl :: [Scope] -> Env -> IO ()
+repl scopes env = do
   putStr "> "
   hFlush stdout
   readMultiline >>= \case
-    Right "quit" -> putStrLn "\nExiting REPL."
-    Right [] -> repl' scopes env
-    Right line -> runRepl line scopes env >>= uncurry repl'
-    Left err -> hPrint stderr err >> repl' scopes env
+    Right "quit" -> pure ()
+    Right [] -> repl scopes env
+    Right line -> runInput line scopes env >>= uncurry repl
+    Left err -> hPrint stderr err >> repl scopes env
 
-runRepl :: String -> [Scope] -> Env -> IO ([Scope], Env)
-runRepl input scopes env =
-  chainIO scan (Just input) >>= chainIO parse >>= \case
-    Nothing -> pure (scopes, env)
-    Just stmts -> case resolveRepl stmts scopes of
+runInput :: String -> [Scope] -> Env -> IO ([Scope], Env)
+runInput input scopes env = case scan input of
+  Left err -> hPrint stderr err >> pure (scopes, env)
+  Right tokens -> case parse tokens of
+    Right stmts -> runStmts stmts scopes env
+    Left err -> case fst <$> expression tokens of
+      Left _     -> hPrint stderr err >> pure (scopes, env)
+      Right expr -> runExpr expr scopes env
+
+runStmts :: [Stmt] -> [Scope] -> Env -> IO ([Scope], Env)
+runStmts stmts scopes env = case replResolve stmts scopes of
+  Left err -> hPrint stderr err >> pure (scopes, env)
+  Right (stmts', dists', scopes') ->
+    replInterpret (stmts', dists') env >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
-      Right (stmts', dists', scopes') ->
-        interpretRepl (stmts', dists') env >>= \case
-          Left err -> hPrint stderr err >> pure (scopes, env)
-          Right env' -> pure (scopes', env')
+      Right env' -> pure (scopes', env')
 
---
-
-chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
-chainIO _ Nothing = pure Nothing
-chainIO f (Just x) =
-  case f x of
-    Left l  -> hPrint stderr l >> pure Nothing
-    Right r -> pure $ pure r
-
-endIO :: (Show l) => (a -> IO (Either l ())) -> Maybe a -> IO ()
-endIO _ Nothing = return ()
-endIO f (Just x) =
-  f x >>= \case
-    Left l -> hPrint stderr l
-    Right _ -> pure ()
-
---
+runExpr :: Expr -> [Scope] -> Env -> IO ([Scope], Env)
+runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
+  Left err -> hPrint stderr err >> pure (scopes, env)
+  Right ([S.Expr expr'], dists', scopes') ->
+    runExceptT (evaluate expr' dists' env) >>= \case
+      Left err -> hPrint stderr err >> pure (scopes, env)
+      Right (val, env') -> putStrLn ("< " ++ show val) >> pure (scopes', env')
+  _ -> undefined
 
 readMultiline :: IO (Either ScanError String)
 readMultiline = do
@@ -67,13 +66,13 @@ readMultiline = do
     Left err -> pure $ Left err
     Right tokens ->
       if braceCount tokens > 0
-        then readBlock [line] (braceCount tokens)
+        then readBlock [line] $ braceCount tokens
         else pure $ Right line
 
 readBlock :: [String] -> Int -> IO (Either ScanError String)
 readBlock acc 0 = pure $ Right $ unlines $ reverse acc
 readBlock acc n = do
-  putStr "| "
+  putStr "∙ "
   hFlush stdout
   next <- getLine
   case scan next of

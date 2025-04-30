@@ -1,0 +1,6 @@
+fun x(y) {
+    print y;
+    return y + 0;
+}
+
+x(1);

@@ -1,0 +1,13 @@
+class F {
+    init() {}
+    hello() {print "hello";}
+}
+
+class X {
+    init() {
+        this.f = F();
+    }
+}
+
+var x = X();
+x.f.hello();

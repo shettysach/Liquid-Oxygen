@@ -24,6 +24,7 @@ executable liquid-oxygen
     build-depends:    
       base ^>=4.18.2.1,
       containers,
-      transformers
+      transformers,
+      time
     default-language: Haskell2010
     ghc-options:      -O2 -Wall

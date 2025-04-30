@@ -20,10 +20,8 @@ var a = "global";
   }
 
   {
-    {
       var a = "nested block";
       showA();
-    }
   }
 
   hello();

@@ -5,3 +5,11 @@ fun x(a) {
 var a = 10;
 a = x(a); 
 print a;
+
+fun m(a,b,c) {
+    print a;
+    print b;
+    print c;
+}
+
+m(10,12,13);

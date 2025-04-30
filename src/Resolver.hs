@@ -9,23 +9,20 @@ import Data.Functor  ((<&>))
 import Data.Map      qualified as Map
 import Data.Maybe    (isJust)
 
+import Control.Arrow ((&&&))
 import Environment
 import Error         (ResolveError (ResolveError))
 import Syntax
 
 data FunctionType = NonF | Fun | Mthd | Init
-
 data ClassType = NonC | Sup | Sub
-
 type State = (FunctionType, ClassType, Distances, [Scope])
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
 resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
 
-resolveRepl :: [Stmt] -> [Scope] -> Either ResolveError ([Stmt], Distances, [Scope])
-resolveRepl stmts scopes = do
-  state <- resolveStmts stmts (NonF, NonC, Map.empty, scopes)
-  pure (stmts, thd4 state, fth4 state)
+replResolve :: [Stmt] -> [Scope] -> Either ResolveError ([Stmt], Distances, [Scope])
+replResolve stmts stack = uncurry (stmts,,) . (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, Map.empty, stack)
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
