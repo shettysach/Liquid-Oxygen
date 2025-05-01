@@ -24,7 +24,7 @@ startRepl = do
 
 repl :: [Scope] -> Env -> IO ()
 repl scopes env = do
-  putStr "> "
+  putStr "-> "
   hFlush stdout
   readMultiline >>= \case
     Right "quit" -> pure ()
@@ -55,7 +55,7 @@ runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
   Right ([S.Expr expr'], dists', scopes') ->
     runExceptT (evaluate expr' dists' env) >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
-      Right (val, env') -> putStrLn ("< " ++ show val) >> pure (scopes', env')
+      Right (val, env') -> putStrLn ("<- " ++ show val) >> pure (scopes', env')
   _ -> undefined
 
 readMultiline :: IO (Either ScanError String)
@@ -72,7 +72,7 @@ readMultiline = do
 readBlock :: [String] -> Int -> IO (Either ScanError String)
 readBlock acc 0 = pure $ Right $ unlines $ reverse acc
 readBlock acc n = do
-  putStr "∙ "
+  putStr " ∙ "
   hFlush stdout
   next <- getLine
   case scan next of

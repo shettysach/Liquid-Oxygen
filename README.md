@@ -19,7 +19,7 @@ Resources
 - https://craftinginterpreters.com/ 
 
 > TODO:
-> - Standard clock function 
+> - clock() - native function 
 
 > **NOTES:**
 > - In this version, the resolver also takes into account global variables by seeding the scope stack with `[Map.empty]`.
