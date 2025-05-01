@@ -39,6 +39,7 @@ data Literal
   | Function' String' Callable Int Env
   | Class' String' (Maybe Literal) (Map String Literal)
   | Instance' String' (Maybe Literal) (Map String Literal)
+  | NativeFn String Callable Int
   | Nil
 
 data Env = Env (IORef (Map String Literal)) (Maybe Env)
@@ -95,10 +96,11 @@ instance Show Literal where
   show (Number' n)         = show n
   show (Bool' True)        = "true"
   show (Bool' False)       = "false"
-  show Nil                 = "nil"
   show (Function' f _ _ _) = "<fn " ++ fst f ++ ">"
   show (Class' c _ _)      = "<class " ++ fst c ++ ">"
   show (Instance' i _ _)   = fst i ++ " instance"
+  show NativeFn{}          = "<native fn>"
+  show Nil                 = "nil"
 
 instance Show UnaryOp where
   show Minus' = "-"

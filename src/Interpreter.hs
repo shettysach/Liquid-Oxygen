@@ -113,14 +113,15 @@ evaluate expr dists env = case expr of
     (rv, envR) <- evaluate r dists envL
     except $ visitBinary op lv rv <&> (,envR)
   Logical op l r -> visitLogical op l r dists env
-  Call calleeExpr argExprs -> do
-    (calleeLit, envC) <- evaluate (fst calleeExpr) dists env
+  Call (callee, pos) argExprs -> do
+    (calleeLit, envC) <- evaluate callee dists env
     let evalArg (vals, envV) arg = first (: vals) <$> evaluate arg dists envV
     argLits <- fst <$> foldlM evalArg ([], envC) argExprs
     case calleeLit of
-      Function'{} -> visitFunction calleeLit argLits <&> (,envC)
-      Class'{}    -> visitClass calleeLit argLits <&> (,envC)
-      literal     -> throwE $ RuntimeError "Calling non-function/non-class" (show literal) (snd calleeExpr)
+      Function'{}    -> visitFunction calleeLit argLits <&> (,envC)
+      NativeFn n f a -> visitFunction (Function' (n, pos) f a envC) argLits <&> (,envC)
+      Class'{}       -> visitClass calleeLit argLits <&> (,envC)
+      literal        -> throwE $ RuntimeError "Calling non-function/non-class" (show literal) pos
   Get obj prop -> do
     (inst, envI) <- evaluate obj dists env
     case inst of

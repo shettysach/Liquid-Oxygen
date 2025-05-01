@@ -2,23 +2,25 @@
 
 module Environment where
 
-import Control.Monad ((>=>))
-import Data.Functor  ((<&>))
-import Data.IORef    (atomicModifyIORef', modifyIORef, newIORef, readIORef)
-import Data.List     qualified as List
-import Data.Map      qualified as Map
+import Control.Monad         ((>=>))
+import Data.Functor          ((<&>))
+import Data.IORef            (atomicModifyIORef', modifyIORef, newIORef, readIORef)
+import Data.List             qualified as List
+import Data.Map              qualified as Map
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
-import Error         (ResolveError (ResolveError), RuntimeError (RuntimeError))
-import Syntax        (Env (Env), Literal, String')
+import Error                 (ResolveError (ResolveError), RuntimeError (RuntimeError))
+import Syntax                (Callable, Env (Env), Literal (NativeFn, Number'), String')
 
-newEnv :: Maybe Env -> IO Env
-newEnv enc = newIORef Map.empty <&> Env `flip` enc
+-- Interpreter
+
+-- data Env = Env (IORef (Map String Literal)) (Maybe Env)
 
 global :: IO Env
-global = newEnv Nothing
+global = newIORef (Map.fromList [("clock", clock)]) <&> Env `flip` Nothing
 
 child :: Env -> IO Env
-child env = newEnv (Just env)
+child env = newIORef Map.empty <&> Env `flip` Just env
 
 parent :: Env -> Env
 parent (Env _ (Just enc)) = enc
@@ -58,7 +60,7 @@ assignAt name value 0 (Env scopeRef _) =
 assignAt name value d (Env _ (Just enc)) = assignAt name value (d - 1) enc
 assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" `uncurry` name
 
---
+-- Resolver
 
 type Scope = Map.Map String Bool
 
@@ -86,3 +88,14 @@ getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
   Just dist -> Right dist
   Nothing   -> Left $ RuntimeError "Unresolved variable" `uncurry` name
+
+-- Native functions
+
+clock :: Literal
+clock = NativeFn "clock" native 0
+ where
+  native :: Callable
+  native [] env = do
+    time <- realToFrac <$> getPOSIXTime
+    pure $ Right (Number' time, env)
+  native _ _ = undefined
