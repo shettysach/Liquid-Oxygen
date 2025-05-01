@@ -1,0 +1,20 @@
+class Test {
+  init() {
+    this.s = false;
+  }
+
+  setTrue() {
+    this.s = true;
+  }
+
+  printState() {
+    print this.s;
+  }
+}
+
+var a = Test();
+var b = a;
+
+a.printState();
+b.setTrue();
+a.printState();

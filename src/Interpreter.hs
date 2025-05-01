@@ -13,6 +13,7 @@ import Data.Foldable              (foldlM, foldrM)
 import Data.Functor               ((<&>))
 import Data.Map                   qualified as Map
 
+import Data.IORef                 (modifyIORef, newIORef, readIORef)
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
@@ -125,20 +126,23 @@ evaluate expr dists env = case expr of
   Get obj prop -> do
     (inst, envI) <- evaluate obj dists env
     case inst of
-      Instance' _ super props -> case Map.lookup (fst prop) props of
-        Just lit -> case lit of
-          Function' name fn arity closure -> do
-            closure' <- liftIO $ child closure >>= initialize "this" inst
-            let func = Function' name fn arity closure' in pure (func, envI)
-          _ -> pure (lit, envI)
-        Nothing -> superLookup super prop inst envI
+      Instance' _ super propsRef -> do
+        props <- liftIO $ readIORef propsRef
+        case Map.lookup (fst prop) props of
+          Just lit -> case lit of
+            Function' name fn arity closure -> do
+              closure' <- liftIO $ child closure >>= initialize "this" inst
+              let func = Function' name fn arity closure' in pure (func, envI)
+            _ -> pure (lit, envI)
+          Nothing -> superLookup super prop inst envI
       _ -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
   Set obj prop val -> do
     (inst, envI) <- evaluate obj dists env
     (lit, envL) <- evaluate val dists envI
     inst' <- case inst of
-      Instance' name super props ->
-        pure (Instance' name super (Map.insert (fst prop) lit props))
+      Instance' name super propsRef -> do
+        liftIO $ modifyIORef propsRef $ Map.insert (fst prop) lit
+        pure (Instance' name super propsRef)
       _ -> throwE $ RuntimeError "Only instances have properties/methods" `uncurry` prop
     case obj of
       Variable var -> do
@@ -182,22 +186,22 @@ visitFunction (Function' name func arity closure) args =
 visitFunction _ _ = undefined
 
 visitClass :: Literal -> [Literal] -> ExceptT RuntimeError IO Literal
-visitClass (Class' name super methods) args =
+visitClass (Class' name super methods) args = do
+  instance' <- liftIO (newIORef methods) <&> Instance' name super
   case Map.lookup "init" methods of
-    Just (Function' _ initr arity initClosure) -> initClass initr arity initClosure
+    Just (Function' _ initr arity closure) -> initClass initr arity closure instance'
     Nothing | null args -> pure instance'
     Nothing -> do
-      (literal, initClosure) <- superLookup super ("init", snd name) instance' undefined
+      (literal, closure) <- superLookup super ("init", snd name) instance' undefined
       case literal of
-        Function' _ initr arity _ -> initClass initr arity initClosure
+        Function' _ initr arity _ -> initClass initr arity closure instance'
         _                         -> throwE $ RuntimeError "Invalid init in superclass" `uncurry` name
     _ -> throwE $ RuntimeError "Invalid init in class defn" `uncurry` name
  where
-  instance' = Instance' name super methods
-  initClass initr arity initClosure =
+  initClass initr arity closure inst =
     if length args == arity
       then do
-        env <- liftIO $ child initClosure >>= initialize "this" instance'
+        env <- liftIO $ child closure >>= initialize "this" inst
         env' <- liftIO (initr args env) >>= except <&> snd
         ExceptT $ getHere ("this", snd name) (parent env')
       else throwE $ RuntimeError ("Arity /= " ++ show arity) `uncurry` name
