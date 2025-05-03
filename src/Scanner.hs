@@ -74,12 +74,13 @@ scanWord lexeme = case lexeme of
 
 scanNumber :: String -> (String, String)
 scanNumber chars =
-  let (intPart, cs) = span isDigit chars
-   in case cs of
-        ('.' : cs1) ->
-          let (decPart, cs2) = span isDigit cs1
-           in (intPart ++ "." ++ decPart, cs2)
-        _ -> (intPart, cs)
+  let (intPart, afterInt) = span isDigit chars
+   in case afterInt of
+        ('.' : afterDot)
+          | isDigit $ head afterDot ->
+              let (decPart, afterDec) = span isDigit afterDot
+               in (intPart ++ "." ++ decPart, afterDec)
+        _ -> (intPart, afterInt)
 
 scanDoubleChar :: Char -> Char -> Maybe TokenType
 scanDoubleChar c0 c1 = case [c0, c1] of

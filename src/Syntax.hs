@@ -37,9 +37,9 @@ data Literal
   | String' String
   | Bool' Bool
   | Function' String' Callable Int Env
+  | UnboundFn String Callable Int
   | Class' String' (Maybe Literal) (Map String Literal)
-  | Instance' String' (Maybe Literal) (IORef (Map String Literal))
-  | NativeFn String Callable Int
+  | Instance' Literal (IORef (Map String Literal))
   | Nil
 
 data Env = Env (IORef (Map String Literal)) (Maybe Env)
@@ -92,15 +92,16 @@ instance Eq Literal where
   _ == _                                 = False
 
 instance Show Literal where
-  show (String' s)         = s
-  show (Number' n)         = show n
-  show (Bool' True)        = "true"
-  show (Bool' False)       = "false"
-  show (Function' f _ _ _) = "<fn " ++ fst f ++ ">"
-  show (Class' c _ _)      = "<class " ++ fst c ++ ">"
-  show (Instance' i _ _)   = "<instance" ++ fst i ++ ">"
-  show NativeFn{}          = "<native fn>"
-  show Nil                 = "nil"
+  show (String' s)                  = s
+  show (Number' n)                  = show n
+  show (Bool' True)                 = "true"
+  show (Bool' False)                = "false"
+  show (Function' f _ _ _)          = "<fn " ++ fst f ++ ">"
+  show (Class' c _ _)               = "<class " ++ fst c ++ ">"
+  show (Instance' (Class' c _ _) _) = "<instance" ++ fst c ++ ">"
+  show UnboundFn{}                  = "<native fn>"
+  show Nil                          = "nil"
+  show _                            = undefined
 
 instance Show UnaryOp where
   show Minus' = "-"

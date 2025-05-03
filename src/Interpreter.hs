@@ -123,48 +123,46 @@ evalExpr expr dists = case expr of
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
     case calleeLit of
-      Function'{}    -> callFunction calleeLit argLits
-      Class'{}       -> callClass calleeLit argLits
-      NativeFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
-      literal        -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
+      Function'{}     -> callFunction calleeLit argLits
+      Class'{}        -> callClass calleeLit argLits
+      UnboundFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
+      literal         -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
   Get instExpr field -> do
-    inst <- evalExpr instExpr dists
-    case inst of
-      Instance' _ super fRef -> do
+    instance' <- evalExpr instExpr dists
+    case instance' of
+      Instance' klass fRef -> do
         fields <- liftIO $ readIORef fRef
         case Map.lookup (fst field) fields of
-          Just (Function' name func arity closure) -> do
-            closure' <- liftIO $ child closure >>= initialize "this" inst
-            pure $ Function' name func arity closure'
-          Just prop -> pure prop
-          Nothing -> superLookup super field inst
-      _ -> throwE $ RuntimeError "Only instances have properties/methods" field
+          Just property -> pure property
+          Nothing       -> findMethod (Just klass) field instance'
+      literal -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
   Set instExpr field rhs -> do
     inst <- evalExpr instExpr dists
     val <- evalExpr rhs dists
     case inst of
-      Instance' _ _ fRef -> liftIO $ modifyIORef fRef $ Map.insert (fst field) val
-      _                  -> throwE $ RuntimeError "Only instances have properties/methods" field
+      Instance' _ fRef -> liftIO $ modifyIORef fRef $ Map.insert (fst field) val
+      literal          -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
     pure val
   This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
   Super pos mthd -> do
     env <- lift get
     super <- ExceptT . liftIO $ getAt ("super", pos) dists env
     inst <- ExceptT . liftIO $ getHere ("this", pos) $ parent env
-    superLookup (Just super) mthd inst
+    findMethod (Just super) mthd inst
 
-superLookup :: Maybe Literal -> String' -> Literal -> EvalT Literal
-superLookup (Just (Class' _ super methods)) field inst =
+bindThis :: Literal -> Literal -> EvalT Literal
+bindThis instance' (Function' name func arity closure) = do
+  closure' <- liftIO $ child closure >>= initialize "this" instance'
+  pure $ Function' name func arity closure'
+bindThis _ literal = pure literal
+
+findMethod :: Maybe Literal -> String' -> Literal -> EvalT Literal
+findMethod (Just (Class' _ super methods)) field inst =
   case Map.lookup (fst field) methods of
-    Just (Function' name func arity closure) ->
-      liftIO $
-        child closure
-          >>= initialize "this" inst
-          <&> Function' name func arity
-    Nothing -> superLookup super field inst
-    _ -> undefined
-superLookup Nothing field _ = throwE $ RuntimeError "Undefined field" field
-superLookup _ _ _ = undefined
+    Just mthd -> bindThis inst mthd
+    Nothing   -> findMethod super field inst
+findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
+findMethod _ _ _ = undefined
 
 callFunction :: Literal -> [Literal] -> EvalT Literal
 callFunction (Function' name func arity closure) args =
@@ -174,28 +172,25 @@ callFunction (Function' name func arity closure) args =
 callFunction _ _ = undefined
 
 callClass :: Literal -> [Literal] -> EvalT Literal
-callClass (Class' name super methods) args = do
-  instance' <- liftIO (newIORef methods) <&> Instance' name super
+callClass klass@(Class' name super methods) args = do
+  instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
   case Map.lookup "init" methods of
-    Just (Function' _ initr ar cl) -> runInit initr ar cl instance'
+    Just (Function' _ initr arity closure) -> initInstance initr arity closure instance'
     Nothing -> do
-      result <- lift . runExceptT $ superLookup super ("init", snd name) instance'
+      result <- lift . runExceptT $ findMethod super ("init", snd name) instance'
       case result of
-        Right (Function' _ initr ar cl) -> runInit initr ar cl instance'
-        Right _                         -> throwE $ RuntimeError "Invalid init in superclass" name
-        Left _ | null args              -> pure instance'
-        Left err                        -> throwE err
+        Right (Function' _ initr arity closure) -> initInstance initr arity closure instance'
+        Right _                                 -> throwE $ RuntimeError "Invalid init in superclass" name
+        Left _ | null args                      -> pure instance'
+        Left err                                -> throwE err
     _ -> throwE $ RuntimeError "Invalid init in class definition" name
  where
-  runInit initr arity closure instance' = do
+  initInstance initr arity closure instance' = do
     if length args /= arity
       then throwE $ RuntimeError ("Arity /= " ++ show arity) name
       else do
-        liftIO $
-          child closure
-            >>= initialize "this" instance'
-            >>= liftIO . initr args
-            >> pure instance'
+        closure' <- liftIO $ child closure >>= initialize "this" instance'
+        liftIO $ initr args closure' >> pure instance'
 callClass _ _ = undefined
 
 visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> EvalT Literal
