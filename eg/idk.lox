@@ -1,6 +1,19 @@
-fun x(y) {
-    print y;
-    return y + 0;
+class S {
+   init(msg) {
+      this.msg = msg; 
+   }
 }
 
-x(1);
+class A < S{
+   say() {
+      print this.msg;
+   }
+}
+
+class B < A {
+}
+
+var b = B("hello");
+b.say();
+b.msg = "world";
+b.say();

@@ -35,7 +35,7 @@ scan' chars@(c : cs) pos@(line, col)
                   line' = line + length (filter (== '\n') lexeme)
                   col' = col + length lexeme + 2
                in (token :) <$> scan' cs2 (line', col')
-            _ -> Left $ ScanError "Unterminated string" lexeme pos
+            _ -> Left $ ScanError "Unterminated string" (lexeme, pos)
   -- Divison and comments
   | c == '/' = case cs of
       '/' : cs' -> scan' (dropWhile (/= '\n') cs') (line, 1)
@@ -50,7 +50,7 @@ scan' chars@(c : cs) pos@(line, col)
         | Just tokenType <- scanSingleChar c ->
             let token = (tokenType, pos)
              in (token :) <$> scan' cs (line, col + 1)
-        | otherwise -> Left (ScanError "Unidentified token" [c] pos)
+        | otherwise -> Left $ ScanError "Unidentified token" (show c, pos)
 
 scanWord :: String -> TokenType
 scanWord lexeme = case lexeme of

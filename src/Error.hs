@@ -2,16 +2,18 @@ module Error where
 
 import Token
 
-data ScanError = ScanError String String (Int, Int)
+type String' = (String, (Int, Int))
+
+data ScanError = ScanError String String'
 
 data ParseError = ParseError String Token
 
-data ResolveError = ResolveError String String (Int, Int)
+data ResolveError = ResolveError String String'
 
-data RuntimeError = RuntimeError String String (Int, Int)
+data RuntimeError = RuntimeError String String'
 
 instance Show ScanError where
-  show (ScanError message lexeme position) =
+  show (ScanError message (lexeme, position)) =
     "SCAN ERROR\n"
       ++ message
       ++ "\nLexeme "
@@ -29,7 +31,7 @@ instance Show ParseError where
       ++ show position
 
 instance Show ResolveError where
-  show (ResolveError message lexeme position) =
+  show (ResolveError message (lexeme, position)) =
     "RESOLVE ERROR\n"
       ++ message
       ++ "\nLexeme "
@@ -38,7 +40,7 @@ instance Show ResolveError where
       ++ show position
 
 instance Show RuntimeError where
-  show (RuntimeError message lexeme position) =
+  show (RuntimeError message (lexeme, position)) =
     "RUNTIME ERROR\n"
       ++ message
       ++ "\nLexeme "

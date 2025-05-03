@@ -1,5 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 module Resolver where
 
@@ -33,8 +34,8 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
       >>= resolveExpr expr . (ftype,ctype,dists,)
       >>= resolveStmts stmts . fourth4 (define $ fst name)
   Var name Nothing -> declareDefine name stack >>= resolveStmts stmts . (ftype,ctype,dists,)
-  Return mExpr | NonF <- ftype -> Left $ ResolveError "Top level return" "return" $ snd mExpr
-  Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" "return" $ snd mExpr
+  Return mExpr | NonF <- ftype -> Left $ ResolveError "Top level return" ("return", snd mExpr)
+  Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" ("return", snd mExpr)
   Return (Just expr, _) -> resolveExpr expr state >>= resolveStmts stmts
   Return (Nothing, _) -> resolveStmts stmts state
   Block stmts' -> resolveStmts stmts' (fourth4 begin state) >>= resolveStmts stmts . fourth4 tail
@@ -50,7 +51,7 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
       >>= resolveStmts [stmt']
       >>= resolveStmts stmts
   Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts
-  Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" `uncurry` name'
+  Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" name'
   Class name (Just super) methods ->
     declareDefine name stack
       >>= resolveExpr super . (ftype,Sub,dists,)
@@ -74,31 +75,32 @@ resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
 resolveMethod mthd                            = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
-resolveExpr (Literal _) state                = Right state
-resolveExpr (Grouping expr) state            = resolveExpr expr state
-resolveExpr (Variable name) state            = resolveLocal name state
-resolveExpr (Assignment name expr) state     = resolveExpr expr state >>= resolveLocal name
-resolveExpr (Unary _ right) state            = resolveExpr right state
-resolveExpr (Binary _ left right) state      = resolveExpr left state >>= resolveExpr right
-resolveExpr (Logical _ left right) state     = resolveExpr left state >>= resolveExpr right
-resolveExpr (Call (expr, _) args) state      = resolveExpr expr state >>= foldrM resolveExpr `flip` args
-resolveExpr (Get expr _) state               = resolveExpr expr state
-resolveExpr (Set expr _ expr') state         = resolveExpr expr state >>= resolveExpr expr'
-resolveExpr (This pos) state@(Mthd, _, _, _) = resolveLocal ("this", pos) state
-resolveExpr (This pos) state@(Init, _, _, _) = resolveLocal ("this", pos) state
-resolveExpr (This pos) _                     = Left $ ResolveError "Used `this` out of class" "this" pos
-resolveExpr (Super pos _) (_, NonC, _, _)    = Left $ ResolveError "Used `super` out of class" "super" pos
-resolveExpr (Super pos _) (_, Sup, _, _)     = Left $ ResolveError "Used `super` in class without superclass" "super" pos
-resolveExpr (Super pos mthd) state           = resolveLocal ("super", pos) state >>= resolveLocal mthd
+resolveExpr (Literal _) state               = Right state
+resolveExpr (Grouping expr) state           = resolveExpr expr state
+resolveExpr (Variable name) state           = resolveLocal name state
+resolveExpr (Assignment name expr) state    = resolveExpr expr state >>= resolveLocal name
+resolveExpr (Unary _ right) state           = resolveExpr right state
+resolveExpr (Binary _ left right) state     = resolveExpr left state >>= resolveExpr right
+resolveExpr (Logical _ left right) state    = resolveExpr left state >>= resolveExpr right
+resolveExpr (Call (expr, _) args) state     = resolveExpr expr state >>= foldrM resolveExpr `flip` args
+resolveExpr (Get expr _) state              = resolveExpr expr state
+resolveExpr (Set expr _ expr') state        = resolveExpr expr state >>= resolveExpr expr'
+resolveExpr (This pos) state@(fst4 -> Mthd) = resolveLocal ("this", pos) state
+resolveExpr (This pos) state@(fst4 -> Init) = resolveLocal ("this", pos) state
+resolveExpr (This pos) _                    = Left $ ResolveError "Used `this` out of class" ("this", pos)
+resolveExpr (Super pos _) (snd4 -> NonC)    = Left $ ResolveError "Used `super` out of class" ("super", pos)
+resolveExpr (Super pos _) (snd4 -> Sup)     = Left $ ResolveError "Used `super` in class without superclass" ("super", pos)
+resolveExpr (Super pos mthd) state          = resolveLocal ("super", pos) state >>= resolveLocal mthd
 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name state
   | scope : _ <- fth4 state
-  , Map.lookup (fst name) scope == Just False =
-      Left $ ResolveError "Can't read local variable in own init" `uncurry` name
-resolveLocal name state = Right $ case calcDistance (fst name) (fth4 state) of
-  Just dist -> third4 (Map.insert name dist) state
-  Nothing   -> state
+  , Just False <- Map.lookup (fst name) scope =
+      Left $ ResolveError "Can't read local variable in own init" name
+resolveLocal name state =
+  pure $ case calcDistance (fst name) (fth4 state) of
+    Just dist -> third4 (Map.insert name dist) state
+    Nothing   -> state
 
 -- Quadruples
 
