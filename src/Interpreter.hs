@@ -9,11 +9,12 @@ import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Class  (lift)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE)
-import Data.Foldable              (foldlM, foldrM)
+import Control.Monad.Trans.State  (StateT (runStateT), get)
+import Data.Foldable              (foldrM)
 import Data.Functor               ((<&>))
+import Data.IORef                 (modifyIORef, newIORef, readIORef)
 import Data.Map                   qualified as Map
 
-import Data.IORef                 (modifyIORef, newIORef, readIORef)
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
@@ -96,103 +97,114 @@ mapMethods (m : ms) dists closure mthds = do
 
 -- Exprs
 
+type EvalT = ExceptT RuntimeError (StateT Env IO)
+
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
-evaluate expr dists env = case expr of
-  Literal lit -> pure (lit, env)
-  Grouping expr' -> evaluate expr' dists env
-  Variable var -> ExceptT $ liftIO (getAt var dists env) <&> fmap (,env)
-  Assignment var expr' -> do
-    (literal, env') <- evaluate expr' dists env
+evaluate expr dists env = ExceptT $ do
+  (result, env') <- runStateT (runExceptT $ evalExpr expr dists) env
+  pure $ result <&> (,env')
+
+evalExpr :: Expr -> Distances -> EvalT Literal
+evalExpr expr dists = case expr of
+  Literal lit -> pure lit
+  Grouping env -> evalExpr env dists
+  Variable var -> lift get >>= ExceptT . liftIO . getAt var dists
+  Assignment var rhs -> do
+    val <- evalExpr rhs dists
     dist <- except $ getDistance var dists
-    liftIO (assignAt var literal dist env')
-      >> pure (literal, env')
-  Unary op right -> do
-    (r, envR) <- evaluate right dists env
-    except $ visitUnary op r <&> (,envR)
+    lift get >>= liftIO . assignAt var val dist >> pure val
+  Logical op l r -> visitLogical op l r dists
+  Unary op right -> evalExpr right dists >>= except . visitUnary op
   Binary op left right -> do
-    (l, envL) <- evaluate left dists env
-    (r, envR) <- evaluate right dists envL
-    except $ visitBinary op l r <&> (,envR)
-  Logical op left right -> visitLogical op left right dists env
+    l <- evalExpr left dists
+    r <- evalExpr right dists
+    except $ visitBinary op l r
   Call (callee, pos) argExprs -> do
-    (calleeLit, envC) <- evaluate callee dists env
-    let evalArg (vals, envV) arg = first (: vals) <$> evaluate arg dists envV
-    argLits <- fst <$> foldlM evalArg ([], envC) argExprs
+    calleeLit <- evalExpr callee dists
+    argLits <- mapM (`evalExpr` dists) (reverse argExprs)
     case calleeLit of
-      Function'{}    -> callFunction calleeLit argLits <&> (,envC)
-      Class'{}       -> callClass calleeLit argLits <&> (,envC)
-      NativeFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits <&> (,envC)
+      Function'{}    -> callFunction calleeLit argLits
+      Class'{}       -> callClass calleeLit argLits
+      NativeFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
       literal        -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
-  Get instance' field -> do
-    (inst, envI) <- evaluate instance' dists env
+  Get instExpr field -> do
+    inst <- evalExpr instExpr dists
     case inst of
-      Instance' _ super fieldsRef -> do
-        fields <- liftIO $ readIORef fieldsRef
+      Instance' _ super fRef -> do
+        fields <- liftIO $ readIORef fRef
         case Map.lookup (fst field) fields of
-          Just (Function' name fn arity closure) -> do
+          Just (Function' name func arity closure) -> do
             closure' <- liftIO $ child closure >>= initialize "this" inst
-            let method = Function' name fn arity closure' in pure (method, envI)
-          Just property -> pure (property, envI)
-          Nothing -> superLookup super field inst envI
+            pure $ Function' name func arity closure'
+          Just prop -> pure prop
+          Nothing -> superLookup super field inst
       _ -> throwE $ RuntimeError "Only instances have properties/methods" field
-  Set instance' field expr' -> do
-    (inst, envI) <- evaluate instance' dists env
-    (literal, envL) <- evaluate expr' dists envI
+  Set instExpr field rhs -> do
+    inst <- evalExpr instExpr dists
+    val <- evalExpr rhs dists
     case inst of
-      Instance' _ _ fieldsRef -> liftIO $ modifyIORef fieldsRef $ Map.insert (fst field) literal
-      _                       -> throwE $ RuntimeError "Only instances have properties/methods" field
-    pure (literal, envL)
-  This pos -> ExceptT $ liftIO (getAt ("this", pos) dists env) <&> fmap (,env)
+      Instance' _ _ fRef -> liftIO $ modifyIORef fRef $ Map.insert (fst field) val
+      _                  -> throwE $ RuntimeError "Only instances have properties/methods" field
+    pure val
+  This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
   Super pos mthd -> do
-    super <- ExceptT $ getAt ("super", pos) dists env
-    inst <- ExceptT $ getHere ("this", pos) $ parent env
-    superLookup (Just super) mthd inst env
+    env <- lift get
+    super <- ExceptT . liftIO $ getAt ("super", pos) dists env
+    inst <- ExceptT . liftIO $ getHere ("this", pos) $ parent env
+    superLookup (Just super) mthd inst
 
-superLookup :: Maybe Literal -> String' -> Literal -> Env -> ExceptT RuntimeError IO (Literal, Env)
-superLookup (Just (Class' _ super fields)) field inst envI = case Map.lookup (fst field) fields of
-  Just (Function' name fn arity closure) -> do
-    closure' <- liftIO $ child closure >>= initialize "this" inst
-    let method = Function' name fn arity closure' in pure (method, envI)
-  Nothing -> superLookup super field inst envI
-  _ -> undefined
-superLookup Nothing field _ _ = throwE $ RuntimeError "Undefined field" field
-superLookup _ _ _ _ = undefined
+superLookup :: Maybe Literal -> String' -> Literal -> EvalT Literal
+superLookup (Just (Class' _ super methods)) field inst =
+  case Map.lookup (fst field) methods of
+    Just (Function' name func arity closure) ->
+      liftIO $
+        child closure
+          >>= initialize "this" inst
+          <&> Function' name func arity
+    Nothing -> superLookup super field inst
+    _ -> undefined
+superLookup Nothing field _ = throwE $ RuntimeError "Undefined field" field
+superLookup _ _ _ = undefined
 
-callFunction :: Literal -> [Literal] -> ExceptT RuntimeError IO Literal
+callFunction :: Literal -> [Literal] -> EvalT Literal
 callFunction (Function' name func arity closure) args =
-  if length args == arity
-    then ExceptT $ fmap fst <$> func args closure
-    else throwE $ RuntimeError ("Arity /= " ++ show arity) name
+  if length args /= arity
+    then throwE $ RuntimeError ("Arity /= " ++ show arity) name
+    else ExceptT . fmap (fmap fst) . liftIO $ func args closure
 callFunction _ _ = undefined
 
-callClass :: Literal -> [Literal] -> ExceptT RuntimeError IO Literal
+callClass :: Literal -> [Literal] -> EvalT Literal
 callClass (Class' name super methods) args = do
   instance' <- liftIO (newIORef methods) <&> Instance' name super
   case Map.lookup "init" methods of
-    Just (Function' _ initr arity closure) -> initClass initr arity closure instance'
+    Just (Function' _ initr ar cl) -> runInit initr ar cl instance'
     Nothing -> do
-      (literal, closure) <- superLookup super ("init", snd name) instance' undefined
-      case literal of
-        Function' _ initr arity _ -> initClass initr arity closure instance'
-        _                         -> throwE $ RuntimeError "Invalid init in superclass" name
-    _ -> throwE $ RuntimeError "Invalid init in class defn" name
+      result <- lift . runExceptT $ superLookup super ("init", snd name) instance'
+      case result of
+        Right (Function' _ initr ar cl) -> runInit initr ar cl instance'
+        Right _                         -> throwE $ RuntimeError "Invalid init in superclass" name
+        Left _ | null args              -> pure instance'
+        Left err                        -> throwE err
+    _ -> throwE $ RuntimeError "Invalid init in class definition" name
  where
-  initClass initr arity closure inst =
-    if length args == arity
-      then do
-        envT <- liftIO $ child closure >>= initialize "this" inst
-        envI <- liftIO (initr args envT) >>= except <&> snd
-        ExceptT $ getHere ("this", snd name) (parent envI)
-      else throwE $ RuntimeError ("Arity /= " ++ show arity) name
+  runInit initr arity closure instance' = do
+    if length args /= arity
+      then throwE $ RuntimeError ("Arity /= " ++ show arity) name
+      else do
+        liftIO $
+          child closure
+            >>= initialize "this" instance'
+            >>= liftIO . initr args
+            >> pure instance'
 callClass _ _ = undefined
 
-visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
-visitLogical op left right dists env = do
-  result@(left', env') <- evaluate left dists env
+visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> EvalT Literal
+visitLogical op left right dists = do
+  left' <- evalExpr left dists
   case fst op of
-    Or | isTruthy left'        -> pure result
-    And | not $ isTruthy left' -> pure result
-    _                          -> evaluate right dists env'
+    Or | isTruthy left'        -> pure left'
+    And | not (isTruthy left') -> pure left'
+    _                          -> evalExpr right dists
 
 visitUnary :: UnaryOp' -> Literal -> Either RuntimeError Literal
 visitUnary (Minus', _) (Number' n) = Right $ Number' $ negate n
