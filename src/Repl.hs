@@ -7,6 +7,7 @@ import Control.Monad.Trans.Except (runExceptT)
 import Data.Map                   qualified as Map
 import System.IO                  (hFlush, hPrint, stderr, stdout)
 
+import Data.List.NonEmpty         (NonEmpty)
 import Environment                (Scope, global)
 import Error                      (ScanError)
 import Interpreter                (evaluate, replInterpret)
@@ -79,7 +80,7 @@ readBlock acc n = do
     Right ts -> readBlock (next : acc) (n + braceCount ts)
     Left err -> pure $ Left err
 
-braceCount :: [Token] -> Int
+braceCount :: NonEmpty Token -> Int
 braceCount = foldr count 0
  where
   count (T.LeftBrace, _) acc  = acc + 1

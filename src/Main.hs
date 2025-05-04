@@ -1,13 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 
-import System.Environment (getArgs)
-import System.IO          (hPrint, stderr)
-
 import Interpreter        (interpret)
 import Parser             (parse)
 import Repl               (startRepl)
 import Resolver           (resolve)
 import Scanner            (scan)
+import System.Environment (getArgs)
+import System.IO          (hPrint, stderr)
 
 main :: IO ()
 main =
