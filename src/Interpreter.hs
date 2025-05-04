@@ -65,11 +65,11 @@ interpretStmts (stmt : stmts) dists env = case stmt of
     (name, func) <- lift $ interpretFunction stmt dists closure
     interpretStmts stmts dists closure
   Class name (Just super) methods -> do
-    (literal, env') <- evaluate super dists env
-    super' <- case literal of
-      Class'{} -> pure $ Just literal
+    (superLit, env') <- evaluate super dists env
+    super' <- case superLit of
+      Class'{} -> pure $ Just superLit
       _        -> throwE $ RuntimeError "Superclass must be a class" name
-    envS <- liftIO $ liftIO (child env) >>= initialize "super" literal
+    envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
     methods' <- liftIO $ mapMethods methods dists envS Map.empty
     let klass = Class' name super' methods'
     envC <- liftIO (initialize (fst name) klass env')
@@ -123,10 +123,10 @@ evalExpr expr dists = case expr of
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
     case calleeLit of
-      Function'{}     -> callFunction calleeLit argLits
-      Class'{}        -> callClass calleeLit argLits
-      UnboundFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
-      literal         -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
+      Function'{}    -> callFunction calleeLit argLits
+      Class'{}       -> callClass calleeLit argLits
+      NativeFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
+      literal        -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
   Get instExpr field -> do
     instance' <- evalExpr instExpr dists
     case instance' of
@@ -146,8 +146,9 @@ evalExpr expr dists = case expr of
   This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
   Super pos mthd -> do
     env <- lift get
-    super <- ExceptT . liftIO $ getAt ("super", pos) dists env
-    inst <- ExceptT . liftIO $ getHere ("this", pos) $ parent env
+    dist <- except $ getDistance ("super", pos) dists
+    super <- ExceptT . liftIO $ getHere ("super", pos) $ ancestor env dist
+    inst <- ExceptT . liftIO $ getHere ("this", pos) $ ancestor env (dist - 1)
     findMethod (Just super) mthd inst
 
 bindThis :: Literal -> Literal -> EvalT Literal

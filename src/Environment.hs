@@ -10,7 +10,7 @@ import Data.Map              qualified as Map
 import Data.Time.Clock.POSIX (getPOSIXTime)
 
 import Error                 (ResolveError (ResolveError), RuntimeError (RuntimeError))
-import Syntax                (Callable, Env (Env), Literal (Number', UnboundFn), String')
+import Syntax                (Callable, Env (Env), Literal (NativeFn, Number'), String')
 
 -- Interpreter
 
@@ -92,7 +92,7 @@ getDistance name dists = case Map.lookup name dists of
 -- Native functions
 
 clock :: Literal
-clock = UnboundFn "clock" native 0
+clock = NativeFn "clock" native 0
  where
   native :: Callable
   native [] env = do

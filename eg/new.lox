@@ -1,17 +1,25 @@
-fun x(a) {
-    return a + a * a;
+class S {
+    m() { print "hi"; }
 }
 
-var a = 10;
-a = x(a); 
-print a;
+class A < S {
+    init() { 
+        this.count = 0;
+        this.countMax =2;
+    }
 
-fun m(a,b,c) {
-    print a;
-    print b;
-    print c;
+    m() {
+    this.count = this.count + 1;
+
+    if (this.count >= this.countMax) {
+      super.m();
+      this.count = 0;
+    }
+  }
 }
 
-m(10,12,13);
-
-123.a;
+var a = A();
+a.m();
+a.m();
+a.m();
+a.m();

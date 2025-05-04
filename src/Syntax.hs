@@ -37,7 +37,7 @@ data Literal
   | String' String
   | Bool' Bool
   | Function' String' Callable Int Env
-  | UnboundFn String Callable Int
+  | NativeFn String Callable Int
   | Class' String' (Maybe Literal) (Map String Literal)
   | Instance' Literal (IORef (Map String Literal))
   | Nil
@@ -99,7 +99,7 @@ instance Show Literal where
   show (Function' f _ _ _)          = "<fn " ++ fst f ++ ">"
   show (Class' c _ _)               = "<class " ++ fst c ++ ">"
   show (Instance' (Class' c _ _) _) = "<instance" ++ fst c ++ ">"
-  show UnboundFn{}                  = "<native fn>"
+  show NativeFn{}                   = "<native fn>"
   show Nil                          = "nil"
   show _                            = undefined
 
