@@ -15,7 +15,7 @@ parse :: [Token] -> Either ParseError [Stmt]
 parse tokens = parse' ([], tokens)
  where
   parse' (stmts, [fst -> T.Eof]) = Right (reverse stmts)
-  parse' (stmts, tokens')        = declaration tokens' >>= (parse' . first (: stmts))
+  parse' (stmts, tokens')        = declaration tokens' >>= parse' . first (: stmts)
 
 type Parse a = (a, [Token]) -> Either ParseError (a, [Token])
 type Parser a = [Token] -> Either ParseError (a, [Token])
@@ -171,82 +171,79 @@ expression = assignment
 assignment :: Parser Expr
 assignment tokens = Parser.or tokens >>= assignment'
  where
-  assignment' (expr, t : ts)
-    | T.Equal <- fst t = do
-        (value, ts') <- assignment ts
-        case expr of
-          Variable var   -> Right (S.Assignment var value, ts')
-          Get expr' prop -> Right (S.Set expr' prop value, ts')
-          _              -> Left (ParseError "Invalid target" t)
-  assignment' (expr, ts) = Right (expr, ts)
+  assignment' (expr, t : ts) | T.Equal <- fst t = do
+    (value, after) <- assignment ts
+    case expr of
+      Variable var   -> Right (S.Assignment var value, after)
+      Get expr' prop -> Right (S.Set expr' prop value, after)
+      _              -> Left (ParseError "Invalid target" t)
+  assignment' (expr, tokens') = Right (expr, tokens')
 
 or :: Parser Expr
-or tokens =
-  Parser.and tokens >>= or'
+or tokens = Parser.and tokens >>= or'
  where
-  or' (expr, []) = Right (expr, [])
-  or' (expr, t : ts) = case fst t of
+  or' (expr, tokens') = case ttype of
     T.Or -> recurse S.Or
-    _    -> Right (expr, t : ts)
+    _    -> Right (expr, tokens')
    where
-    recurse op = Parser.and ts >>= or' . first (Logical (op, snd t) expr)
+    (ttype, pos) = head tokens'
+    recurse op = Parser.and (tail tokens') >>= or' . first (Logical (op, pos) expr)
 
 and :: Parser Expr
-and tokens =
-  equality tokens >>= and'
+and tokens = equality tokens >>= and'
  where
-  and' (expr, []) = Right (expr, [])
-  and' (expr, t : ts) = case fst t of
+  and' (expr, tokens') = case ttype of
     T.And -> recurse S.And
-    _     -> Right (expr, t : ts)
+    _     -> Right (expr, tokens')
    where
-    recurse op = equality ts >>= and' . first (Logical (op, snd t) expr)
+    (ttype, pos) = head tokens'
+    recurse op = equality (tail tokens') >>= and' . first (Logical (op, pos) expr)
 
 equality :: Parser Expr
 equality tokens = comparison tokens >>= equality'
  where
-  equality' (expr, []) = Right (expr, [])
-  equality' (expr, t : ts) = case fst t of
+  equality' (expr, tokens') = case ttype of
     T.BangEqual  -> recurse S.BangEqual
     T.EqualEqual -> recurse S.EqualEqual
-    _            -> Right (expr, t : ts)
+    _            -> Right (expr, tokens')
    where
-    recurse op = comparison ts >>= equality' . first (Binary (op, snd t) expr)
+    (ttype, pos) = head tokens'
+    recurse op = comparison (tail tokens') >>= equality' . first (Binary (op, pos) expr)
 
 comparison :: Parser Expr
 comparison tokens = term tokens >>= comparison'
  where
-  comparison' (expr, []) = Right (expr, [])
-  comparison' (expr, t : ts) = case fst t of
+  comparison' (expr, tokens') = case ttype of
     T.Greater      -> recurse S.Greater
     T.GreaterEqual -> recurse S.GreaterEqual
     T.Less         -> recurse S.Less
     T.LessEqual    -> recurse S.LessEqual
-    _              -> Right (expr, t : ts)
+    _              -> Right (expr, tokens')
    where
-    recurse op = term ts >>= comparison' . first (Binary (op, snd t) expr)
+    (ttype, pos) = head tokens'
+    recurse op = term (tail tokens') >>= comparison' . first (Binary (op, pos) expr)
 
 term :: Parser Expr
 term tokens = factor tokens >>= term'
  where
-  term' (expr, []) = Right (expr, [])
-  term' (expr, t : ts) = case fst t of
+  term' (expr, tokens') = case ttype of
     T.Minus -> recurse S.Minus
     T.Plus  -> recurse S.Plus
-    _       -> Right (expr, t : ts)
+    _       -> Right (expr, tokens')
    where
-    recurse op = factor ts >>= term' . first (Binary (op, snd t) expr)
+    (ttype, pos) = head tokens'
+    recurse op = factor (tail tokens') >>= term' . first (Binary (op, pos) expr)
 
 factor :: Parser Expr
 factor tokens = unary tokens >>= factor'
  where
-  factor' (expr, []) = Right (expr, [])
-  factor' (expr, t : ts) = case fst t of
+  factor' (expr, tokens') = case fst t of
     T.Slash -> recurse S.Slash
     T.Star  -> recurse S.Star
-    _       -> Right (expr, t : ts)
+    _       -> Right (expr, tokens')
    where
-    recurse op = unary ts >>= factor' . first (Binary (op, snd t) expr)
+    t = head tokens'
+    recurse op = unary (tail tokens') >>= factor' . first (Binary (op, snd t) expr)
 
 unary :: Parser Expr
 unary [] = call []
@@ -263,43 +260,46 @@ call tokens = primary tokens >>= call'
     T.LeftParen -> finish expr ts >>= call'
     T.Dot -> case ts of
       (T.Identifier prop, pos) : ts' -> call' (Get expr (prop, pos), ts')
-      _                              -> Left $ ParseError "Expected prop/method name after '.'" (head ts)
+      _                              -> Left $ ParseError "Expected prop/method name after '.'" $ head ts
     _ -> Right (expr, t : ts)
 
   finish expr tokens' = do
     (args, rest) <- arguments tokens'
-
     when (length args >= 255) (Left $ ParseError ">= 255 args" $ head rest)
-
-    case rest of
-      (fst -> T.RightParen) : ts -> Right (Call (expr, (snd . head) tokens) args, ts)
-      _                          -> Left $ ParseError "Expected ')' after args" (head rest)
+    rest & case fst $ head rest of
+      T.RightParen -> Right . (Call (expr, (snd . head) tokens) args,) . tail
+      _            -> Left . ParseError "Expected ')' after args" . head
 
   arguments tokens'@(fst . head -> T.RightParen) = Right ([], tokens')
   arguments tokens' = do
     (arg, rest) <- expression tokens'
-
-    case rest of
-      (fst -> T.Comma) : ts -> first (arg :) <$> arguments ts
-      _                     -> Right ([arg], rest)
+    rest & case fst $ head rest of
+      T.Comma -> fmap (first (arg :)) . arguments . tail
+      _       -> Right . ([arg],)
 
 primary :: Parser Expr
 primary (t : ts) = case fst t of
-  T.False' -> Right (Literal $ Bool' False, ts)
-  T.True' -> Right (Literal $ Bool' True, ts)
-  T.Nil -> Right (Literal S.Nil, ts)
-  T.Number' n -> Right (Literal $ S.Number' n, ts)
-  T.String' s -> Right (Literal $ S.String' s, ts)
+  T.False'       -> Right (Literal $ Bool' False, ts)
+  T.True'        -> Right (Literal $ Bool' True, ts)
+  T.Nil          -> Right (Literal S.Nil, ts)
+  T.Number' n    -> Right (Literal $ S.Number' n, ts)
+  T.String' s    -> Right (Literal $ S.String' s, ts)
   T.Identifier i -> Right (Variable (i, snd t), ts)
-  T.This -> Right (S.This (snd t), ts)
-  T.Super -> case ts of
-    (fst -> T.Dot) : (T.Identifier name, pos) : rest -> Right (S.Super (snd t) (name, pos), rest)
-    (fst -> T.Dot) : rest -> Left $ ParseError "Expected superclass method name after '.'" $ head rest
-    _ -> Left $ ParseError "Expected '.' after 'super'" (head ts)
-  T.LeftParen -> do
-    (expr, rest) <- expression ts
-    case fst $ head rest of
-      T.RightParen -> Right (Grouping expr, tail rest)
-      _            -> Left $ ParseError "Expected ')' after expr" t
-  _ -> Left $ ParseError "Expected expr" t
+  T.This         -> Right (S.This (snd t), ts)
+  T.Super        -> superExpr t ts
+  T.LeftParen    -> grouping t ts
+  _              -> Left $ ParseError "Expected expr" t
 primary tokens = Left $ ParseError "Expected expr" $ head tokens
+
+superExpr :: Token -> Parser Expr
+superExpr t ts = case ts of
+  (fst -> T.Dot) : (T.Identifier name, pos) : rest -> Right (S.Super (snd t) (name, pos), rest)
+  (fst -> T.Dot) : rest -> Left $ ParseError "Expected superclass method name after '.'" $ head rest
+  _ -> Left $ ParseError "Expected '.' after 'super'" $ head ts
+
+grouping :: Token -> Parser Expr
+grouping t ts = do
+  (expr, rest) <- expression ts
+  case fst $ head rest of
+    T.RightParen -> Right (Grouping expr, tail rest)
+    _            -> Left $ ParseError "Expected ')' after expr" t

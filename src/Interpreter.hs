@@ -154,7 +154,7 @@ bindThis :: Literal -> Literal -> EvalT Literal
 bindThis instance' (Function' name func arity closure) = do
   closure' <- liftIO $ child closure >>= initialize "this" instance'
   pure $ Function' name func arity closure'
-bindThis _ literal = pure literal
+bindThis _ _ = undefined
 
 findMethod :: Maybe Literal -> String' -> Literal -> EvalT Literal
 findMethod (Just (Class' _ super methods)) field inst =
