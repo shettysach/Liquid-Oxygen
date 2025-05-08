@@ -4,10 +4,10 @@
 module Repl where
 
 import Control.Monad.Trans.Except (runExceptT)
+import Data.List.NonEmpty         (NonEmpty)
 import Data.Map                   qualified as Map
 import System.IO                  (hFlush, hPrint, stderr, stdout)
 
-import Data.List.NonEmpty         (NonEmpty)
 import Environment                (Scope, global)
 import Error                      (ScanError)
 import Interpreter                (evaluate, replInterpret)

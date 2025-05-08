@@ -1,8 +1,8 @@
 module Scanner where
 
 import Data.Char          (isAlpha, isAlphaNum, isDigit)
-
 import Data.List.NonEmpty (NonEmpty, fromList, (<|))
+
 import Error              (ScanError (ScanError))
 import Token
 

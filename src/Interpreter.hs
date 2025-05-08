@@ -4,7 +4,7 @@
 
 module Interpreter where
 
-import Control.Arrow              (first, second)
+import Control.Arrow              (second)
 import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Class  (lift)
@@ -97,14 +97,14 @@ mapMethods (m : ms) dists closure mthds = do
 
 -- Exprs
 
-type EvalT = ExceptT RuntimeError (StateT Env IO)
+type Eval = ExceptT RuntimeError (StateT Env IO)
 
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 evaluate expr dists env = ExceptT $ do
   (result, env') <- runStateT (runExceptT $ evalExpr expr dists) env
   pure $ result <&> (,env')
 
-evalExpr :: Expr -> Distances -> EvalT Literal
+evalExpr :: Expr -> Distances -> Eval Literal
 evalExpr expr dists = case expr of
   Literal lit -> pure lit
   Grouping env -> evalExpr env dists
@@ -113,12 +113,17 @@ evalExpr expr dists = case expr of
     val <- evalExpr rhs dists
     dist <- except $ getDistance var dists
     lift get >>= liftIO . assignAt var val dist >> pure val
-  Logical op l r -> visitLogical op l r dists
-  Unary op right -> evalExpr right dists >>= except . visitUnary op
+  Unary op right ->
+    evalExpr right dists
+      >>= visitUnary op
   Binary op left right -> do
     l <- evalExpr left dists
     r <- evalExpr right dists
-    except $ visitBinary op l r
+    visitBinary op l r
+  Logical op left right -> do
+    l <- evalExpr left dists
+    r <- evalExpr right dists
+    visitLogical op l r
   Call (callee, pos) argExprs -> do
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
@@ -151,13 +156,13 @@ evalExpr expr dists = case expr of
     inst <- ExceptT . liftIO $ getHere ("this", pos) $ ancestor env (dist - 1)
     findMethod (Just super) mthd inst
 
-bindThis :: Literal -> Literal -> EvalT Literal
+bindThis :: Literal -> Literal -> Eval Literal
 bindThis instance' (Function' name func arity closure) = do
   closure' <- liftIO $ child closure >>= initialize "this" instance'
   pure $ Function' name func arity closure'
 bindThis _ _ = undefined
 
-findMethod :: Maybe Literal -> String' -> Literal -> EvalT Literal
+findMethod :: Maybe Literal -> String' -> Literal -> Eval Literal
 findMethod (Just (Class' _ super methods)) field inst =
   case Map.lookup (fst field) methods of
     Just mthd -> bindThis inst mthd
@@ -165,14 +170,14 @@ findMethod (Just (Class' _ super methods)) field inst =
 findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
 findMethod _ _ _ = undefined
 
-callFunction :: Literal -> [Literal] -> EvalT Literal
+callFunction :: Literal -> [Literal] -> Eval Literal
 callFunction (Function' name func arity closure) args =
   if length args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else ExceptT . fmap (fmap fst) . liftIO $ func args closure
 callFunction _ _ = undefined
 
-callClass :: Literal -> [Literal] -> EvalT Literal
+callClass :: Literal -> [Literal] -> Eval Literal
 callClass klass@(Class' name super methods) args = do
   instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
   case Map.lookup "init" methods of
@@ -194,35 +199,28 @@ callClass klass@(Class' name super methods) args = do
         liftIO $ initr args closure' >> pure instance'
 callClass _ _ = undefined
 
-visitLogical :: LogicalOp' -> Expr -> Expr -> Distances -> EvalT Literal
-visitLogical op left right dists = do
-  left' <- evalExpr left dists
-  case fst op of
-    Or | isTruthy left'        -> pure left'
-    And | not (isTruthy left') -> pure left'
-    _                          -> evalExpr right dists
+visitLogical :: LogicalOp' -> Literal -> Literal -> Eval Literal
+visitLogical op left right = case fst op of
+  Or | isTruthy left        -> pure left
+  And | not $ isTruthy left -> pure left
+  _                         -> pure right
 
-visitUnary :: UnaryOp' -> Literal -> Either RuntimeError Literal
-visitUnary (Minus', _) (Number' n) = Right $ Number' $ negate n
-visitUnary (Minus', pos) _         = Left $ RuntimeError "Invalid operand" (show Minus', pos)
-visitUnary (Bang, _) right         = Right $ Bool' $ not $ isTruthy right
+visitUnary :: UnaryOp' -> Literal -> Eval Literal
+visitUnary (Minus', _) (Number' n) = pure $ Number' $ negate n
+visitUnary (Minus', pos) _         = throwE $ RuntimeError "Invalid operand" (show Minus', pos)
+visitUnary (Bang, _) right         = pure $ Bool' $ not $ isTruthy right
 
-visitBinary :: BinaryOp' -> Literal -> Literal -> Either RuntimeError Literal
-visitBinary op left right
-  | EqualEqual <- fst op = Right $ Bool' $ left == right
-  | BangEqual <- fst op = Right $ Bool' $ left /= right
-  | Number' l <- left
-  , Number' r <- right = Right $ case fst op of
-      Minus        -> Number' $ l - r
-      Slash        -> Number' $ l / r
-      Star         -> Number' $ l * r
-      Plus         -> Number' $ l + r
-      Greater      -> Bool' $ l > r
-      GreaterEqual -> Bool' $ l >= r
-      Less         -> Bool' $ l < r
-      LessEqual    -> Bool' $ l <= r
-  | String' l <- left
-  , String' r <- right
-  , Plus <- fst op =
-      Right $ String' $ l ++ r
-  | otherwise = Left $ RuntimeError "Invalid operands" $ first show op
+visitBinary :: BinaryOp' -> Literal -> Literal -> Eval Literal
+visitBinary (EqualEqual, _) left right = pure $ Bool' $ left == right
+visitBinary (BangEqual, _) left right = pure $ Bool' $ left /= right
+visitBinary (op, _) (Number' l) (Number' r) = case op of
+  Minus        -> pure $ Number' $ l - r
+  Slash        -> pure $ Number' $ l / r
+  Star         -> pure $ Number' $ l * r
+  Plus         -> pure $ Number' $ l + r
+  Greater      -> pure $ Bool' $ l > r
+  GreaterEqual -> pure $ Bool' $ l >= r
+  Less         -> pure $ Bool' $ l < r
+  LessEqual    -> pure $ Bool' $ l <= r
+visitBinary (Plus, _) (String' l) (String' r) = pure $ String' $ l ++ r
+visitBinary (op, pos) _ _ = throwE $ RuntimeError "Invalid operands" (show op, pos)

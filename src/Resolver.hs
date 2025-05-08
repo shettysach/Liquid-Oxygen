@@ -4,13 +4,13 @@
 
 module Resolver where
 
+import Control.Arrow ((&&&))
 import Control.Monad ((>=>))
 import Data.Foldable (foldrM)
 import Data.Functor  ((<&>))
 import Data.Map      qualified as Map
 import Data.Maybe    (isJust)
 
-import Control.Arrow ((&&&))
 import Environment
 import Error         (ResolveError (ResolveError))
 import Syntax
