@@ -78,9 +78,9 @@ scanNumber :: String -> (String, String)
 scanNumber chars =
   let (intPart, afterInt) = span isDigit chars
    in case afterInt of
-        ('.' : afterDot)
-          | isDigit $ head afterDot ->
-              let (decPart, afterDec) = span isDigit afterDot
+        '.' : d : ds
+          | isDigit d ->
+              let (decPart, afterDec) = span isDigit (d : ds)
                in (intPart ++ "." ++ decPart, afterDec)
         _ -> (intPart, afterInt)
 

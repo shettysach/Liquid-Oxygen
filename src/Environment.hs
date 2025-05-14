@@ -6,8 +6,10 @@ import Control.Monad         ((>=>))
 import Data.Functor          ((<&>))
 import Data.IORef            (atomicModifyIORef', modifyIORef, newIORef, readIORef)
 import Data.List             qualified as List
+import Data.List.NonEmpty    (NonEmpty ((:|)), fromList, tail, toList, (<|))
 import Data.Map              qualified as Map
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Prelude               hiding (tail)
 
 import Error                 (ResolveError (ResolveError), RuntimeError (RuntimeError))
 import Syntax                (Callable, Env (Env), Literal (NativeFn, Number'), String')
@@ -17,7 +19,7 @@ import Syntax                (Callable, Env (Env), Literal (NativeFn, Number'), 
 -- data Env = Env (IORef (Map String Literal)) (Maybe Env)
 
 global :: IO Env
-global = newIORef (Map.fromList [("clock", clock)]) <&> Env `flip` Nothing
+global = newIORef nativeFns <&> Env `flip` Nothing
 
 child :: Env -> IO Env
 child env = newIORef Map.empty <&> Env `flip` Just env
@@ -36,12 +38,12 @@ progenitor (Env _ (Just enc)) = progenitor enc
 progenitor env                = env
 
 initialize :: String -> Literal -> Env -> IO Env
-initialize name value env@(Env scopeRef _) = modifyIORef scopeRef (Map.insert name value) >> pure env
+initialize name value env@(Env ref _) = modifyIORef ref (Map.insert name value) >> pure env
 
 getHere :: String' -> Env -> IO (Either RuntimeError Literal)
-getHere (name, pos) (Env scopeRef _) = do
-  scope <- readIORef scopeRef
-  case Map.lookup name scope of
+getHere (name, pos) (Env ref _) = do
+  vars <- readIORef ref
+  case Map.lookup name vars of
     Just val -> pure . Right $ val
     Nothing  -> pure . Left $ RuntimeError "Undefined variable" (name, pos)
 
@@ -51,12 +53,11 @@ getAt name dists env = getHere name $ case getDistance name dists of
   Left _     -> progenitor env
 
 assignAt :: String' -> Literal -> Int -> Env -> IO (Either RuntimeError ())
-assignAt name value 0 (Env scopeRef _) =
-  let assign scope =
-        if Map.member (fst name) scope
-          then (Map.insert (fst name) value scope, Right ())
-          else (scope, Left $ RuntimeError "Undefined variable" name)
-   in atomicModifyIORef' scopeRef assign
+assignAt name value 0 (Env ref _) =
+  atomicModifyIORef' ref $ \vars ->
+    if Map.member (fst name) vars
+      then (Map.insert (fst name) value vars, Right ())
+      else (vars, Left $ RuntimeError "Undefined variable" name)
 assignAt name value d (Env _ (Just enc)) = assignAt name value (d - 1) enc
 assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" name
 
@@ -66,23 +67,29 @@ type Scope = Map.Map String Bool
 
 type Distances = Map.Map String' Int
 
-begin :: [Scope] -> [Scope]
-begin = (Map.empty :)
+start :: NonEmpty Scope
+start = fromList [Map.empty]
 
-declare :: String' -> [Scope] -> Either ResolveError [Scope]
-declare (name, pos) (scope : _) | Map.member name scope = Left $ ResolveError "Variable already declared" (name, pos)
-declare (name, _) (scope : scopes) = Right $ Map.insert name False scope : scopes
-declare _ _ = undefined
+begin :: NonEmpty Scope -> NonEmpty Scope
+begin = (Map.empty <|)
 
-define :: String -> [Scope] -> [Scope]
-define name (scope : scopes) = Map.insert name True scope : scopes
-define _ _                   = undefined
+end :: NonEmpty Scope -> NonEmpty Scope
+end = fromList . tail
 
-declareDefine :: String' -> [Scope] -> Either ResolveError [Scope]
+declare :: String' -> NonEmpty Scope -> Either ResolveError (NonEmpty Scope)
+declare (name, pos) (scope :| scopes) =
+  if Map.member name scope
+    then Left $ ResolveError "Variable already declared" (name, pos)
+    else Right $ Map.insert name False scope :| scopes
+
+define :: String -> NonEmpty Scope -> NonEmpty Scope
+define name (scope :| scopes) = Map.insert name True scope :| scopes
+
+declareDefine :: String' -> NonEmpty Scope -> Either ResolveError (NonEmpty Scope)
 declareDefine name = declare name >=> pure . (define . fst) name
 
-calcDistance :: String -> [Scope] -> Maybe Int
-calcDistance = List.findIndex . Map.member
+calcDistance :: String -> NonEmpty Scope -> Maybe Int
+calcDistance name = List.findIndex (Map.member name) . toList
 
 getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
@@ -90,6 +97,9 @@ getDistance name dists = case Map.lookup name dists of
   Nothing   -> Left $ RuntimeError "Unresolved variable" name
 
 -- Native functions
+
+nativeFns :: Map.Map String Literal
+nativeFns = Map.fromList [("clock", clock)]
 
 clock :: Literal
 clock = NativeFn "clock" native 0

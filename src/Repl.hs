@@ -1,14 +1,12 @@
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Repl where
 
 import Control.Monad.Trans.Except (runExceptT)
 import Data.List.NonEmpty         (NonEmpty)
-import Data.Map                   qualified as Map
 import System.IO                  (hFlush, hPrint, stderr, stdout)
 
-import Environment                (Scope, global)
+import Environment                (Scope, global, start)
 import Error                      (ScanError)
 import Interpreter                (evaluate, replInterpret)
 import Parser                     (expression, parse)
@@ -20,10 +18,10 @@ import Token                      as T
 startRepl :: IO ()
 startRepl = do
   putStrLn "Welcome to the REPL. Type `quit` to quit."
-  global >>= repl [Map.empty]
+  global >>= repl start
   putStrLn "Exiting the REPL."
 
-repl :: [Scope] -> Env -> IO ()
+repl :: NonEmpty Scope -> Env -> IO ()
 repl scopes env = do
   putStr "-> "
   hFlush stdout
@@ -33,7 +31,7 @@ repl scopes env = do
     Right line -> runInput line scopes env >>= uncurry repl
     Left err -> hPrint stderr err >> repl scopes env
 
-runInput :: String -> [Scope] -> Env -> IO ([Scope], Env)
+runInput :: String -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runInput input scopes env = case scan input of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right tokens -> case parse tokens of
@@ -42,7 +40,7 @@ runInput input scopes env = case scan input of
       Left _     -> hPrint stderr err >> pure (scopes, env)
       Right expr -> runExpr expr scopes env
 
-runStmts :: [Stmt] -> [Scope] -> Env -> IO ([Scope], Env)
+runStmts :: [Stmt] -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runStmts stmts scopes env = case replResolve stmts scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right (stmts', dists', scopes') ->
@@ -50,7 +48,7 @@ runStmts stmts scopes env = case replResolve stmts scopes of
       Left err -> hPrint stderr err >> pure (scopes, env)
       Right env' -> pure (scopes', env')
 
-runExpr :: Expr -> [Scope] -> Env -> IO ([Scope], Env)
+runExpr :: Expr -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right ([S.Expr expr'], dists', scopes') ->

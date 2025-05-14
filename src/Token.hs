@@ -46,7 +46,6 @@ data TokenType
   | Var
   | While
   | Eof
-  deriving (Eq)
 
 instance Show TokenType where
   show LeftParen      = "("

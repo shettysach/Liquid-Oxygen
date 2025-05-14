@@ -4,25 +4,28 @@
 
 module Resolver where
 
-import Control.Arrow ((&&&))
-import Control.Monad ((>=>))
-import Data.Foldable (foldrM)
-import Data.Functor  ((<&>))
-import Data.Map      qualified as Map
-import Data.Maybe    (isJust)
+import Control.Arrow      ((&&&))
+import Control.Monad      ((>=>))
+import Data.Foldable      (foldrM)
+import Data.Functor       ((<&>))
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Map           qualified as Map
+import Data.Maybe         (isJust)
 
 import Environment
-import Error         (ResolveError (ResolveError))
+import Error              (ResolveError (ResolveError))
 import Syntax
 
 data FunctionType = NonF | Fun | Mthd | Init
+
 data ClassType = NonC | Sup | Sub
-type State = (FunctionType, ClassType, Distances, [Scope])
+
+type State = (FunctionType, ClassType, Distances, NonEmpty Scope)
 
 resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, [Map.empty])
+resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, start)
 
-replResolve :: [Stmt] -> [Scope] -> Either ResolveError ([Stmt], Distances, [Scope])
+replResolve :: [Stmt] -> NonEmpty Scope -> Either ResolveError ([Stmt], Distances, NonEmpty Scope)
 replResolve stmts stack = uncurry (stmts,,) . (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, Map.empty, stack)
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
@@ -38,7 +41,7 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
   Return mExpr | Init <- ftype, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" ("return", snd mExpr)
   Return (Just expr, _) -> resolveExpr expr state >>= resolveStmts stmts
   Return (Nothing, _) -> resolveStmts stmts state
-  Block stmts' -> resolveStmts stmts' (fourth4 begin state) >>= resolveStmts stmts . fourth4 tail
+  Block stmts' -> resolveStmts stmts' (fourth4 begin state) >>= resolveStmts stmts . fourth4 end
   Print expr -> resolveExpr expr state >>= resolveStmts stmts
   If cond thenStmt elseStmt ->
     resolveExpr cond state
@@ -56,18 +59,18 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
     declareDefine name stack
       >>= resolveExpr super . (ftype,Sub,dists,)
       >>= (foldrM resolveMethod `flip` methods) . fourth4 (define "this" . begin . define "super" . begin)
-      >>= resolveStmts stmts . second4 (const ctype) . fourth4 (tail . tail)
+      >>= resolveStmts stmts . second4 (const ctype) . fourth4 (end . end)
   Class name Nothing methods ->
     declareDefine name stack
       >>= (foldrM resolveMethod `flip` methods) . (ftype,Sup,dists,) . define "this" . begin
-      >>= resolveStmts stmts . fourth4 tail
+      >>= resolveStmts stmts . fourth4 end
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
 resolveFunction (Function name params stmts') ntype (ftype, ctype, dists, stack) =
   declareDefine name stack
     >>= (foldrM declareDefine `flip` params) . begin
     >>= resolveStmts stmts' . (ntype,ctype,dists,)
-    <&> first4 (const ftype) . fourth4 tail
+    <&> first4 (const ftype) . fourth4 end
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
@@ -94,13 +97,12 @@ resolveExpr (Super pos mthd) state          = resolveLocal ("super", pos) state 
 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name state
-  | scope : _ <- fth4 state
+  | scope :| _ <- fth4 state
   , Just False <- Map.lookup (fst name) scope =
       Left $ ResolveError "Can't read local variable in own init" name
-resolveLocal name state =
-  pure $ case calcDistance (fst name) (fth4 state) of
-    Just dist -> third4 (Map.insert name dist) state
-    Nothing   -> state
+resolveLocal name state = pure $ case calcDistance (fst name) (fth4 state) of
+  Just dist -> third4 (Map.insert name dist) state
+  Nothing   -> state
 
 -- Quadruples
 

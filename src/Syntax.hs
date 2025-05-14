@@ -15,7 +15,6 @@ data Stmt
   | Function String' [String'] [Stmt]
   | Return (Maybe' Expr)
   | Class String' (Maybe Expr) [Stmt]
-  deriving (Show)
 
 data Expr
   = Literal Literal
@@ -30,7 +29,6 @@ data Expr
   | Set Expr String' Expr
   | Super Position String'
   | This Position
-  deriving (Show)
 
 data Literal
   = Number' Double

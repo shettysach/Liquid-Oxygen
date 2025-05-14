@@ -4,7 +4,8 @@ module Parser where
 
 import Control.Arrow      (first)
 import Control.Monad      (when)
-import Data.List.NonEmpty (NonEmpty ((:|)), fromList)
+import Data.List.NonEmpty (NonEmpty ((:|)), fromList, head)
+import Prelude            hiding (head)
 
 import Error              (ParseError (ParseError))
 import Syntax             as S
@@ -33,7 +34,8 @@ declaration (t :| ts) = case fst t of
   T.For       -> for ts'
   T.Print     -> expression ts' >>= statement . first S.Print
   _           -> expression (t :| ts) >>= statement . first S.Expr
- where ts' = fromList ts
+ where
+  ts' = fromList ts
 
 statement :: Parse Stmt
 statement (stmt, (fst -> T.Semicolon) :| ts) = Right (stmt, fromList ts)
@@ -144,17 +146,16 @@ returnStatement pos tokens = do
 
 classDeclaration :: Parser Stmt
 classDeclaration ((T.Identifier name, pos) :| ts) = do
-  (super, afterSuper) <- case ts of
-    (fst -> T.Less) : (T.Identifier name', pos') : rest -> Right (Just (S.Variable (name', pos')), rest)
-    (fst -> T.LeftBrace) : _                            -> Right (Nothing, ts)
-    (fst -> T.Less) : t' : _                            -> Left $ ParseError "Expected superclass after '<'" t'
-    _                                                   -> Left $ ParseError "Expected '<' or '{'" (head ts)
+  (super, afterSuper) <- case fromList ts of
+    (fst -> T.Less) :| (T.Identifier name', pos') : rest -> Right (Just (S.Variable (name', pos')), rest)
+    (fst -> T.LeftBrace) :| _                            -> Right (Nothing, ts)
+    (fst -> T.Less) :| t' : _                            -> Left $ ParseError "Expected superclass after '<'" t'
+    ts'                                                  -> Left $ ParseError "Expected '<' or '{'" (head ts')
 
-  case afterSuper of
-    (T.LeftBrace, _) : rest -> first (S.Class (name, pos) super) <$> method ([], fromList rest)
-    _                       -> Left $ ParseError "Expected '{' before class body" (head afterSuper)
-classDeclaration (t :| _) =
-  Left $ ParseError "Expected class name" t
+  case fromList afterSuper of
+    (T.LeftBrace, _) :| rest -> first (S.Class (name, pos) super) <$> method ([], fromList rest)
+    afterSuper'              -> Left $ ParseError "Expected '{' before class body" (head afterSuper')
+classDeclaration (t :| _) = Left $ ParseError "Expected class name" t
 
 method :: Parse [Stmt]
 method (mthds, t :| ts) | T.RightBrace <- fst t = Right (reverse mthds, fromList ts)
@@ -247,9 +248,9 @@ call tokens@(h :| _) = primary tokens >>= call'
  where
   call' (expr, t :| ts) = case fst t of
     T.LeftParen -> finish expr (fromList ts) >>= call'
-    T.Dot -> case ts of
-      (T.Identifier prop, pos) : ts' -> call' (Get expr (prop, pos), fromList ts')
-      _                              -> Left $ ParseError "Expected prop/method name after '.'" $ head ts
+    T.Dot -> case fromList ts of
+      (T.Identifier prop, pos) :| ts' -> call' (Get expr (prop, pos), fromList ts')
+      ts'                             -> Left $ ParseError "Expected prop/method name after '.'" $ head ts'
     _ -> Right (expr, t :| ts)
 
   finish expr tokens' = do
@@ -279,13 +280,14 @@ primary (t :| ts) = case fst t of
   T.Super        -> superExpr (t :| ts)
   T.LeftParen    -> grouping (t :| ts)
   _              -> Left $ ParseError "Expected expr" t
- where ts' = fromList ts
+ where
+  ts' = fromList ts
 
 superExpr :: Parser Expr
-superExpr (t :| ts) = case ts of
-  (fst -> T.Dot) : (T.Identifier name, pos) : rest -> Right (S.Super (snd t) (name, pos), fromList rest)
-  (fst -> T.Dot) : rest -> Left $ ParseError "Expected superclass method name after '.'" $ head rest
-  _ -> Left $ ParseError "Expected '.' after 'super'" $ head ts
+superExpr (t :| ts) = case fromList ts of
+  (fst -> T.Dot) :| (T.Identifier name, pos) : rest -> Right (S.Super (snd t) (name, pos), fromList rest)
+  (fst -> T.Dot) :| rest -> Left $ ParseError "Expected superclass method name after '.'" $ head $ fromList rest
+  ts' -> Left $ ParseError "Expected '.' after 'super'" $ head ts'
 
 grouping :: Parser Expr
 grouping (t :| ts) = do

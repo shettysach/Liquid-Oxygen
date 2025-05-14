@@ -77,7 +77,7 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Class name Nothing methods -> do
     methods' <- liftIO $ mapMethods methods dists env Map.empty
     let klass = Class' name Nothing methods'
-    envC <- liftIO (initialize (fst name) klass env)
+    envC <- liftIO $ initialize (fst name) klass env
     interpretStmts stmts dists envC
 
 interpretFunction :: Stmt -> Distances -> Env -> IO (String, Literal)
@@ -113,9 +113,7 @@ evalExpr expr dists = case expr of
     val <- evalExpr rhs dists
     dist <- except $ getDistance var dists
     lift get >>= liftIO . assignAt var val dist >> pure val
-  Unary op right ->
-    evalExpr right dists
-      >>= visitUnary op
+  Unary op right -> evalExpr right dists >>= visitUnary op
   Binary op left right -> do
     l <- evalExpr left dists
     r <- evalExpr right dists
@@ -156,12 +154,6 @@ evalExpr expr dists = case expr of
     inst <- ExceptT . liftIO $ getHere ("this", pos) $ ancestor env (dist - 1)
     findMethod (Just super) mthd inst
 
-bindThis :: Literal -> Literal -> Eval Literal
-bindThis instance' (Function' name func arity closure) = do
-  closure' <- liftIO $ child closure >>= initialize "this" instance'
-  pure $ Function' name func arity closure'
-bindThis _ _ = undefined
-
 findMethod :: Maybe Literal -> String' -> Literal -> Eval Literal
 findMethod (Just (Class' _ super methods)) field inst =
   case Map.lookup (fst field) methods of
@@ -169,6 +161,12 @@ findMethod (Just (Class' _ super methods)) field inst =
     Nothing   -> findMethod super field inst
 findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
 findMethod _ _ _ = undefined
+
+bindThis :: Literal -> Literal -> Eval Literal
+bindThis instance' (Function' name func arity closure) = do
+  closure' <- liftIO $ child closure >>= initialize "this" instance'
+  pure $ Function' name func arity closure'
+bindThis _ _ = undefined
 
 callFunction :: Literal -> [Literal] -> Eval Literal
 callFunction (Function' name func arity closure) args =
@@ -181,23 +179,22 @@ callClass :: Literal -> [Literal] -> Eval Literal
 callClass klass@(Class' name super methods) args = do
   instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
   case Map.lookup "init" methods of
-    Just (Function' _ initr arity closure) -> initInstance initr arity closure instance'
+    Just (Function' _ initr arity closure) -> initInstance initr name args arity closure instance'
     Nothing -> do
       result <- lift . runExceptT $ findMethod super ("init", snd name) instance'
       case result of
-        Right (Function' _ initr arity closure) -> initInstance initr arity closure instance'
+        Right (Function' _ initr arity closure) -> initInstance initr name args arity closure instance'
         Right _                                 -> throwE $ RuntimeError "Invalid init in superclass" name
         Left _ | null args                      -> pure instance'
         Left err                                -> throwE err
     _ -> throwE $ RuntimeError "Invalid init in class definition" name
- where
-  initInstance initr arity closure instance' = do
-    if length args /= arity
-      then throwE $ RuntimeError ("Arity /= " ++ show arity) name
-      else do
-        closure' <- liftIO $ child closure >>= initialize "this" instance'
-        liftIO $ initr args closure' >> pure instance'
 callClass _ _ = undefined
+
+initInstance :: Callable -> String' -> [Literal] -> Int -> Env -> Literal -> Eval Literal
+initInstance initr name args arity closure instance' =
+  if length args /= arity
+    then throwE $ RuntimeError ("Arity /= " ++ show arity) name
+    else liftIO $ child closure >>= initialize "this" instance' >>= liftIO . initr args >> pure instance'
 
 visitLogical :: LogicalOp' -> Literal -> Literal -> Eval Literal
 visitLogical op left right = case fst op of
