@@ -1,0 +1,8 @@
+class X {
+    f() {
+      print "hi";
+    }
+}
+
+var x = X();
+x.f();

@@ -14,8 +14,6 @@ import Prelude               hiding (tail)
 import Error                 (ResolveError (ResolveError), RuntimeError (RuntimeError))
 import Syntax                (Callable, Env (Env), Literal (NativeFn, Number'), String')
 
--- Interpreter
-
 -- data Env = Env (IORef (Map String Literal)) (Maybe Env)
 
 global :: IO Env
@@ -61,7 +59,16 @@ assignAt name value 0 (Env ref _) =
 assignAt name value d (Env _ (Just enc)) = assignAt name value (d - 1) enc
 assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" name
 
--- Resolver
+nativeFns :: Map.Map String Literal
+nativeFns = Map.fromList [("clock", clock)]
+
+clock :: Literal
+clock = NativeFn "clock" native 0
+ where
+  native :: Callable
+  native _ env = do
+    time <- realToFrac <$> getPOSIXTime
+    pure $ pure (Number' time, env)
 
 type Scope = Map.Map String Bool
 
@@ -93,19 +100,5 @@ calcDistance name = List.findIndex (Map.member name) . toList
 
 getDistance :: String' -> Distances -> Either RuntimeError Int
 getDistance name dists = case Map.lookup name dists of
-  Just dist -> Right dist
   Nothing   -> Left $ RuntimeError "Unresolved variable" name
-
--- Native functions
-
-nativeFns :: Map.Map String Literal
-nativeFns = Map.fromList [("clock", clock)]
-
-clock :: Literal
-clock = NativeFn "clock" native 0
- where
-  native :: Callable
-  native [] env = do
-    time <- realToFrac <$> getPOSIXTime
-    pure $ pure (Number' time, env)
-  native _ _ = undefined
+  Just dist -> Right dist

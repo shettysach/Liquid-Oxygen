@@ -1,4 +1,5 @@
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RecursiveDo         #-}
 {-# LANGUAGE TupleSections       #-}
 
@@ -18,8 +19,6 @@ import Data.Map                   qualified as Map
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
-
--- Stmts
 
 interpret :: ([Stmt], Distances) -> IO (Either RuntimeError ())
 interpret (statements, distances) = global >>= runExceptT . interpretStmts statements distances <&> void
@@ -67,17 +66,17 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Class name (Just super) methods -> do
     (superLit, env') <- evaluate super dists env
     super' <- case superLit of
-      Class'{} -> pure $ Just superLit
-      _        -> throwE $ RuntimeError "Superclass must be a class" name
+      Class' superLoxCls -> pure $ Just superLoxCls
+      _                  -> throwE $ RuntimeError "Superclass must be a class" name
     envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
     methods' <- liftIO $ mapMethods methods dists envS Map.empty
-    let klass = Class' name super' methods'
-    envC <- liftIO (initialize (fst name) klass env')
+    let klass = LoxCls name super' methods'
+    envC <- liftIO $ initialize (fst name) (Class' klass) env'
     interpretStmts stmts dists envC
   Class name Nothing methods -> do
     methods' <- liftIO $ mapMethods methods dists env Map.empty
-    let klass = Class' name Nothing methods'
-    envC <- liftIO $ initialize (fst name) klass env
+    let klass = LoxCls name Nothing methods'
+    envC <- liftIO $ initialize (fst name) (Class' klass) env
     interpretStmts stmts dists envC
 
 interpretFunction :: Stmt -> Distances -> Env -> IO (String, Literal)
@@ -86,16 +85,15 @@ interpretFunction (Function name params body) dists closure =
         child env
           >>= foldrM (uncurry initialize) `flip` zip (map fst params) args
           >>= runExceptT . interpretStmts body dists
-   in pure (fst name, Function' name callable (length params) closure)
+      func = LoxFn name callable (length params) closure
+   in pure (fst name, Function' func)
 interpretFunction _ _ _ = undefined
 
-mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String Literal -> IO (Map.Map String Literal)
+mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String LoxFn -> IO (Map.Map String LoxFn)
 mapMethods [] _ _ mthds = pure mthds
 mapMethods (m : ms) dists closure mthds = do
-  (func, name) <- interpretFunction m dists closure
-  mapMethods ms dists closure $ Map.insert func name mthds
-
--- Exprs
+  (name, Function' funk) <- interpretFunction m dists closure
+  mapMethods ms dists closure $ Map.insert name funk mthds
 
 type Eval = ExceptT RuntimeError (StateT Env IO)
 
@@ -126,10 +124,10 @@ evalExpr expr dists = case expr of
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
     case calleeLit of
-      Function'{}    -> callFunction calleeLit argLits
-      Class'{}       -> callClass calleeLit argLits
-      NativeFn n f a -> callFunction (Function' (n, pos) f a undefined) argLits
-      literal        -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
+      Function' funk           -> callFunction funk argLits
+      NativeFn name func arity -> callFunction (LoxFn (name, pos) func arity undefined) argLits
+      Class' klass             -> callClass klass argLits
+      literal                  -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
   Get instExpr field -> do
     instance' <- evalExpr instExpr dists
     case instance' of
@@ -137,7 +135,7 @@ evalExpr expr dists = case expr of
         fields <- liftIO $ readIORef fRef
         case Map.lookup (fst field) fields of
           Just property -> pure property
-          Nothing       -> findMethod (Just klass) field instance'
+          Nothing       -> findMethod (Just klass) field instance' <&> Function'
       literal -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
   Set instExpr field rhs -> do
     inst <- evalExpr instExpr dists
@@ -147,51 +145,32 @@ evalExpr expr dists = case expr of
       literal          -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
     pure val
   This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
-  Super pos mthd -> do
+  Super pos method -> do
     env <- lift get
     dist <- except $ getDistance ("super", pos) dists
-    super <- ExceptT . liftIO $ getHere ("super", pos) $ ancestor env dist
-    inst <- ExceptT . liftIO $ getHere ("this", pos) $ ancestor env (dist - 1)
-    findMethod (Just super) mthd inst
+    Class' superLoxCls <- ExceptT . liftIO . getHere ("super", pos) $ ancestor env dist
+    instance' <- ExceptT . liftIO . getHere ("this", pos) $ ancestor env (dist - 1)
+    findMethod (Just superLoxCls) method instance' <&> Function'
 
-findMethod :: Maybe Literal -> String' -> Literal -> Eval Literal
-findMethod (Just (Class' _ super methods)) field inst =
-  case Map.lookup (fst field) methods of
-    Just mthd -> bindThis inst mthd
-    Nothing   -> findMethod super field inst
-findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
-findMethod _ _ _ = undefined
-
-bindThis :: Literal -> Literal -> Eval Literal
-bindThis instance' (Function' name func arity closure) = do
-  closure' <- liftIO $ child closure >>= initialize "this" instance'
-  pure $ Function' name func arity closure'
-bindThis _ _ = undefined
-
-callFunction :: Literal -> [Literal] -> Eval Literal
-callFunction (Function' name func arity closure) args =
+callFunction :: LoxFn -> [Literal] -> Eval Literal
+callFunction (LoxFn name func arity closure) args =
   if length args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else ExceptT . fmap (fmap fst) . liftIO $ func args closure
-callFunction _ _ = undefined
 
-callClass :: Literal -> [Literal] -> Eval Literal
-callClass klass@(Class' name super methods) args = do
+callClass :: LoxCls -> [Literal] -> Eval Literal
+callClass klass@(LoxCls name super methods) args = do
   instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
   case Map.lookup "init" methods of
-    Just (Function' _ initr arity closure) -> initInstance initr name args arity closure instance'
-    Nothing -> do
-      result <- lift . runExceptT $ findMethod super ("init", snd name) instance'
-      case result of
-        Right (Function' _ initr arity closure) -> initInstance initr name args arity closure instance'
-        Right _                                 -> throwE $ RuntimeError "Invalid init in superclass" name
-        Left _ | null args                      -> pure instance'
-        Left err                                -> throwE err
-    _ -> throwE $ RuntimeError "Invalid init in class definition" name
-callClass _ _ = undefined
+    Just funk -> initInstance funk name args instance'
+    Nothing ->
+      lift (runExceptT $ findMethod super ("init", snd name) instance') >>= \case
+        Right funk -> initInstance funk name args instance'
+        Left _ | null args -> pure instance'
+        Left err -> throwE err
 
-initInstance :: Callable -> String' -> [Literal] -> Int -> Env -> Literal -> Eval Literal
-initInstance initr name args arity closure instance' =
+initInstance :: LoxFn -> String' -> [Literal] -> Literal -> Eval Literal
+initInstance (LoxFn _ initr arity closure) name args instance' =
   if length args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else liftIO $ child closure >>= initialize "this" instance' >>= liftIO . initr args >> pure instance'
@@ -210,14 +189,23 @@ visitUnary (Bang, _) right         = pure $ Bool' $ not $ isTruthy right
 visitBinary :: BinaryOp' -> Literal -> Literal -> Eval Literal
 visitBinary (EqualEqual, _) left right = pure $ Bool' $ left == right
 visitBinary (BangEqual, _) left right = pure $ Bool' $ left /= right
-visitBinary (op, _) (Number' l) (Number' r) = case op of
-  Minus        -> pure $ Number' $ l - r
-  Slash        -> pure $ Number' $ l / r
-  Star         -> pure $ Number' $ l * r
-  Plus         -> pure $ Number' $ l + r
-  Greater      -> pure $ Bool' $ l > r
-  GreaterEqual -> pure $ Bool' $ l >= r
-  Less         -> pure $ Bool' $ l < r
-  LessEqual    -> pure $ Bool' $ l <= r
+visitBinary (op, _) (Number' l) (Number' r) = pure $ case op of
+  Minus        -> Number' $ l - r
+  Slash        -> Number' $ l / r
+  Star         -> Number' $ l * r
+  Plus         -> Number' $ l + r
+  Greater      -> Bool' $ l > r
+  GreaterEqual -> Bool' $ l >= r
+  Less         -> Bool' $ l < r
+  LessEqual    -> Bool' $ l <= r
 visitBinary (Plus, _) (String' l) (String' r) = pure $ String' $ l ++ r
 visitBinary (op, pos) _ _ = throwE $ RuntimeError "Invalid operands" (show op, pos)
+
+findMethod :: Maybe LoxCls -> String' -> Literal -> Eval LoxFn
+findMethod (Just (LoxCls _ super methods)) field inst = case Map.lookup (fst field) methods of
+  Just mthd -> bindThis mthd inst
+  Nothing   -> findMethod super field inst
+findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
+
+bindThis :: LoxFn -> Literal -> Eval LoxFn
+bindThis (LoxFn name func arity closure) instance' = liftIO $ child closure >>= initialize "this" instance' <&> LoxFn name func arity

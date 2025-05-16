@@ -34,15 +34,19 @@ data Literal
   = Number' Double
   | String' String
   | Bool' Bool
-  | Function' String' Callable Int Env
+  | Function' LoxFn
+  | Class' LoxCls
+  | Instance' LoxCls (IORef (Map String Literal))
   | NativeFn String Callable Int
-  | Class' String' (Maybe Literal) (Map String Literal)
-  | Instance' Literal (IORef (Map String Literal))
   | Nil
 
 data Env = Env (IORef (Map String Literal)) (Maybe Env)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
+
+data LoxFn = LoxFn String' Callable Int Env
+
+data LoxCls = LoxCls String' (Maybe LoxCls) (Map String LoxFn)
 
 data UnaryOp = Minus' | Bang
 
@@ -82,24 +86,26 @@ isTruthy Nil       = False
 isTruthy _         = True
 
 instance Eq Literal where
-  String' l == String' r                 = l == r
-  Number' l == Number' r                 = l == r
-  Bool' l == Bool' r                     = l == r
-  Nil == Nil                             = True
-  Function' l _ _ _ == Function' r _ _ _ = l == r
-  _ == _                                 = False
+  String' l == String' r     = l == r
+  Number' l == Number' r     = l == r
+  Bool' l == Bool' r         = l == r
+  Nil == Nil                 = True
+  Function' l == Function' r = l == r
+  _ == _                     = False
+
+instance Eq LoxFn where
+  LoxFn n _ a _ == LoxFn n' _ a' _ = n == n' && a == a'
 
 instance Show Literal where
   show (String' s)                  = s
   show (Number' n)                  = show n
   show (Bool' True)                 = "true"
   show (Bool' False)                = "false"
-  show (Function' f _ _ _)          = "<fn " ++ fst f ++ ">"
-  show (Class' c _ _)               = "<class " ++ fst c ++ ">"
-  show (Instance' (Class' c _ _) _) = "<instance" ++ fst c ++ ">"
+  show (Function' (LoxFn f _ _ _))  = "<fn " ++ fst f ++ ">"
+  show (Class' (LoxCls c _ _))      = "<class " ++ fst c ++ ">"
+  show (Instance' (LoxCls c _ _) _) = "<instance" ++ fst c ++ ">"
   show NativeFn{}                   = "<native fn>"
   show Nil                          = "nil"
-  show _                            = undefined
 
 instance Show UnaryOp where
   show Minus' = "-"

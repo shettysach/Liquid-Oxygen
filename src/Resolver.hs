@@ -1,6 +1,8 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE ViewPatterns        #-}
+{-# HLINT ignore "Redundant <&>" #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module Resolver where
 
@@ -58,11 +60,13 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
   Class name (Just super) methods ->
     declareDefine name stack
       >>= resolveExpr super . (ftype,Sub,dists,)
-      >>= (foldrM resolveMethod `flip` methods) . fourth4 (define "this" . begin . define "super" . begin)
+      <&> fourth4 (define "this" . begin . define "super" . begin)
+      >>= foldrM resolveMethod `flip` methods
       >>= resolveStmts stmts . second4 (const ctype) . fourth4 (end . end)
   Class name Nothing methods ->
     declareDefine name stack
-      >>= (foldrM resolveMethod `flip` methods) . (ftype,Sup,dists,) . define "this" . begin
+      <&> (ftype,Sup,dists,) . define "this" . begin
+      >>= foldrM resolveMethod `flip` methods
       >>= resolveStmts stmts . fourth4 end
 
 resolveFunction :: Stmt -> FunctionType -> State -> Either ResolveError State
@@ -74,8 +78,8 @@ resolveFunction (Function name params stmts') ntype (ftype, ctype, dists, stack)
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
-resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
-resolveMethod mthd                            = resolveFunction mthd Mthd
+resolveMethod mthd@(Function (fst -> "init") _ _) = resolveFunction mthd Init
+resolveMethod mthd                                = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
 resolveExpr (Literal _) state               = Right state
