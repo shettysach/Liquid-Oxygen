@@ -20,11 +20,11 @@ import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
 
-interpret :: ([Stmt], Distances) -> IO (Either RuntimeError ())
-interpret (statements, distances) = global >>= runExceptT . interpretStmts statements distances <&> void
+interpret :: [Stmt] -> Distances -> IO (Either RuntimeError ())
+interpret stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
 
-replInterpret :: ([Stmt], Distances) -> Env -> IO (Either RuntimeError Env)
-replInterpret (statements, distances) env = runExceptT (interpretStmts statements distances env) <&> fmap snd
+replInterpret :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
+replInterpret stmts dists env = runExceptT (interpretStmts stmts dists env) <&> fmap snd
 
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
@@ -38,9 +38,9 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Return (Just expr, _) -> evaluate expr dists env <&> second parent
   Return (Nothing, _) -> evaluate (Literal Nil) dists env <&> second parent
   Block stmts' ->
-    liftIO (child env)
-      >>= interpretStmts stmts' dists
-      >>= interpretStmts stmts dists . parent . snd
+    liftIO (child env) >>= interpretStmts stmts' dists >>= \case
+      (Nil, _) -> interpretStmts stmts dists env
+      (lit, env') -> pure (lit, env')
   Print expr -> do
     (literal, env') <- evaluate expr dists env
     liftIO $ print literal
@@ -66,8 +66,8 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Class name (Just super) methods -> do
     (superLit, env') <- evaluate super dists env
     super' <- case superLit of
-      Class' superLoxCls -> pure $ Just superLoxCls
-      _                  -> throwE $ RuntimeError "Superclass must be a class" name
+      Class' super' -> pure $ Just super'
+      _             -> throwE $ RuntimeError "Superclass must be a class" name
     envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
     methods' <- liftIO $ mapMethods methods dists envS Map.empty
     let klass = LoxCls name super' methods'
@@ -92,8 +92,8 @@ interpretFunction _ _ _ = undefined
 mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String LoxFn -> IO (Map.Map String LoxFn)
 mapMethods [] _ _ mthds = pure mthds
 mapMethods (m : ms) dists closure mthds = do
-  (name, Function' funk) <- interpretFunction m dists closure
-  mapMethods ms dists closure $ Map.insert name funk mthds
+  (name, Function' func) <- interpretFunction m dists closure
+  mapMethods ms dists closure $ Map.insert name func mthds
 
 type Eval = ExceptT RuntimeError (StateT Env IO)
 
@@ -124,7 +124,7 @@ evalExpr expr dists = case expr of
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
     case calleeLit of
-      Function' funk           -> callFunction funk argLits
+      Function' func           -> callFunction func argLits
       NativeFn name func arity -> callFunction (LoxFn (name, pos) func arity undefined) argLits
       Class' klass             -> callClass klass argLits
       literal                  -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
@@ -148,9 +148,9 @@ evalExpr expr dists = case expr of
   Super pos method -> do
     env <- lift get
     dist <- except $ getDistance ("super", pos) dists
-    Class' superLoxCls <- ExceptT . liftIO . getHere ("super", pos) $ ancestor env dist
+    Class' super <- ExceptT . liftIO . getHere ("super", pos) $ ancestor env dist
     instance' <- ExceptT . liftIO . getHere ("this", pos) $ ancestor env (dist - 1)
-    findMethod (Just superLoxCls) method instance' <&> Function'
+    findMethod (Just super) method instance' <&> Function'
 
 callFunction :: LoxFn -> [Literal] -> Eval Literal
 callFunction (LoxFn name func arity closure) args =
@@ -162,10 +162,10 @@ callClass :: LoxCls -> [Literal] -> Eval Literal
 callClass klass@(LoxCls name super methods) args = do
   instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
   case Map.lookup "init" methods of
-    Just funk -> initInstance funk name args instance'
+    Just func -> initInstance func name args instance'
     Nothing ->
       lift (runExceptT $ findMethod super ("init", snd name) instance') >>= \case
-        Right funk -> initInstance funk name args instance'
+        Right func -> initInstance func name args instance'
         Left _ | null args -> pure instance'
         Left err -> throwE err
 

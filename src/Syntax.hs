@@ -103,7 +103,7 @@ instance Show Literal where
   show (Bool' False)                = "false"
   show (Function' (LoxFn f _ _ _))  = "<fn " ++ fst f ++ ">"
   show (Class' (LoxCls c _ _))      = "<class " ++ fst c ++ ">"
-  show (Instance' (LoxCls c _ _) _) = "<instance" ++ fst c ++ ">"
+  show (Instance' (LoxCls c _ _) _) = "<instance " ++ fst c ++ ">"
   show NativeFn{}                   = "<native fn>"
   show Nil                          = "nil"
 

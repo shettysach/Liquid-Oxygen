@@ -24,11 +24,11 @@ data ClassType = NonC | Sup | Sub
 
 type State = (FunctionType, ClassType, Distances, NonEmpty Scope)
 
-resolve :: [Stmt] -> Either ResolveError ([Stmt], Distances)
-resolve stmts = (stmts,) . thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, start)
+resolve :: [Stmt] -> Either ResolveError Distances
+resolve stmts = thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, start)
 
-replResolve :: [Stmt] -> NonEmpty Scope -> Either ResolveError ([Stmt], Distances, NonEmpty Scope)
-replResolve stmts stack = uncurry (stmts,,) . (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, Map.empty, stack)
+replResolve :: [Stmt] -> NonEmpty Scope -> Either ResolveError (Distances, NonEmpty Scope)
+replResolve stmts stack = (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, Map.empty, stack)
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
@@ -55,7 +55,8 @@ resolveStmts (stmt : stmts) state@(ftype, ctype, dists, stack) = case stmt of
     resolveExpr cond state
       >>= resolveStmts [stmt']
       >>= resolveStmts stmts
-  Function{} -> resolveFunction stmt Fun state >>= resolveStmts stmts
+  Function{} | NonF <- ftype -> resolveFunction stmt Fun state >>= resolveStmts stmts
+  Function{} -> resolveFunction stmt ftype state >>= resolveStmts stmts
   Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" name'
   Class name (Just super) methods ->
     declareDefine name stack
@@ -78,8 +79,8 @@ resolveFunction (Function name params stmts') ntype (ftype, ctype, dists, stack)
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
-resolveMethod mthd@(Function (fst -> "init") _ _) = resolveFunction mthd Init
-resolveMethod mthd                                = resolveFunction mthd Mthd
+resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
+resolveMethod mthd                            = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
 resolveExpr (Literal _) state               = Right state

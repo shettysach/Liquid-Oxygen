@@ -6,7 +6,7 @@ import Control.Monad.Trans.Except (runExceptT)
 import Data.List.NonEmpty         (NonEmpty)
 import System.IO                  (hFlush, hPrint, stderr, stdout)
 
-import Environment                (Scope, global, start)
+import Environment                (Scope)
 import Error                      (ScanError)
 import Interpreter                (evaluate, replInterpret)
 import Parser                     (expression, parse)
@@ -15,19 +15,12 @@ import Scanner                    (scan)
 import Syntax                     as S
 import Token                      as T
 
-startRepl :: IO ()
-startRepl = do
-  putStrLn "Welcome to the REPL. Type `quit` to quit."
-  global >>= repl start
-  putStrLn "Exiting the REPL."
-
 repl :: NonEmpty Scope -> Env -> IO ()
 repl scopes env = do
   putStr "-> "
   hFlush stdout
   readMultiline >>= \case
-    Right "quit" -> pure ()
-    Right [] -> repl scopes env
+    Right [] -> pure ()
     Right line -> runInput line scopes env >>= uncurry repl
     Left err -> hPrint stderr err >> repl scopes env
 
@@ -43,19 +36,18 @@ runInput input scopes env = case scan input of
 runStmts :: [Stmt] -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runStmts stmts scopes env = case replResolve stmts scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
-  Right (stmts', dists', scopes') ->
-    replInterpret (stmts', dists') env >>= \case
+  Right (dists', scopes') ->
+    replInterpret stmts dists' env >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
       Right env' -> pure (scopes', env')
 
 runExpr :: Expr -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
-  Right ([S.Expr expr'], dists', scopes') ->
-    runExceptT (evaluate expr' dists' env) >>= \case
+  Right (dists', scopes') ->
+    runExceptT (evaluate expr dists' env) >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
       Right (val, env') -> putStrLn ("<- " ++ show val) >> pure (scopes', env')
-  _ -> undefined
 
 readMultiline :: IO (Either ScanError String)
 readMultiline = do
@@ -64,9 +56,9 @@ readMultiline = do
   case scan line of
     Left err -> pure $ Left err
     Right tokens ->
-      if braceCount tokens > 0
-        then readBlock [line] $ braceCount tokens
-        else pure $ Right line
+      if braceCount tokens == 0
+        then pure $ Right line
+        else readBlock [line] $ braceCount tokens
 
 readBlock :: [String] -> Int -> IO (Either ScanError String)
 readBlock acc 0 = pure $ Right $ unlines $ reverse acc
@@ -79,8 +71,8 @@ readBlock acc n = do
     Left err -> pure $ Left err
 
 braceCount :: NonEmpty Token -> Int
-braceCount = foldr count 0
+braceCount = sum . fmap delta
  where
-  count (T.LeftBrace, _) acc  = acc + 1
-  count (T.RightBrace, _) acc = acc - 1
-  count _ acc                 = acc
+  delta (T.LeftBrace, _)  = 1
+  delta (T.RightBrace, _) = -1
+  delta _                 = 0
