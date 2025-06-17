@@ -17,7 +17,7 @@ import Token                      as T
 
 repl :: NonEmpty Scope -> Env -> IO ()
 repl scopes env = do
-  putStr "-> "
+  putStr "> "
   hFlush stdout
   readMultiline >>= \case
     Right [] -> pure ()
@@ -47,7 +47,7 @@ runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
   Right (dists', scopes') ->
     runExceptT (evaluate expr dists' env) >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
-      Right (val, env') -> putStrLn ("<- " ++ show val) >> pure (scopes', env')
+      Right (val, env') -> print val >> pure (scopes', env')
 
 readMultiline :: IO (Either ScanError String)
 readMultiline = do

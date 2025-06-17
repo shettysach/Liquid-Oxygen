@@ -1,6 +1,8 @@
 module Token where
 
-type Token = (TokenType, (Int, Int))
+import Utils (Position)
+
+type Token = (TokenType, Position)
 
 data TokenType
   = -- Single-character tokens.

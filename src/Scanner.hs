@@ -5,24 +5,25 @@ import Data.List.NonEmpty (NonEmpty, fromList, (<|))
 
 import Error              (ScanError (ScanError))
 import Token
+import Utils              (Position, lengthW)
 
 scan :: String -> Either ScanError (NonEmpty Token)
 scan source = scan' source (1, 1)
 
-scan' :: String -> (Int, Int) -> Either ScanError (NonEmpty Token)
+scan' :: String -> Position -> Either ScanError (NonEmpty Token)
 scan' [] pos = Right $ fromList [(Eof, pos)]
 scan' chars@(c : cs) pos@(line, col)
   -- Keywords and identifiers
   | isAlpha c || c == '_' =
       let (lexeme, cs') = span (\x -> isAlphaNum x || x == '_') chars
           token = (scanWord lexeme, pos)
-          col' = col + length lexeme
+          col' = col + lengthW lexeme
        in (token <|) <$> scan' cs' (line, col')
   -- Numbers
   | isDigit c =
       let (lexeme, cs') = scanNumber chars
           token = (Number' (read lexeme), pos)
-          col' = col + length lexeme
+          col' = col + lengthW lexeme
        in (token <|) <$> scan' cs' (line, col')
   -- Whitespaces
   | c `elem` [' ', '\t', '\r'] = scan' cs (line, col + 1)
@@ -34,8 +35,8 @@ scan' chars@(c : cs) pos@(line, col)
        in case cs1 of
             '"' : cs2 ->
               let token = (String' lexeme, pos)
-                  line' = line + length (filter (== '\n') lexeme)
-                  col' = col + length lexeme + 2
+                  line' = line + lengthW (filter (== '\n') lexeme)
+                  col' = col + lengthW lexeme + 2
                in (token <|) <$> scan' cs2 (line', col')
             _ -> Left $ ScanError "Unterminated string" (lexeme, pos)
   -- Divison and comments
@@ -76,13 +77,13 @@ scanWord lexeme = case lexeme of
 
 scanNumber :: String -> (String, String)
 scanNumber chars =
-  let (intPart, afterInt) = span isDigit chars
-   in case afterInt of
+  let (intPart, afterWord) = span isDigit chars
+   in case afterWord of
         '.' : d : ds
           | isDigit d ->
               let (decPart, afterDec) = span isDigit (d : ds)
                in (intPart ++ "." ++ decPart, afterDec)
-        _ -> (intPart, afterInt)
+        _ -> (intPart, afterWord)
 
 scanDoubleChar :: Char -> Char -> Maybe TokenType
 scanDoubleChar c0 c1 = case [c0, c1] of

@@ -22,9 +22,7 @@ cabal run liquid-oxygen <script>
 
 ### Notes:
 
-#### Map vs HashMap
-- Implementation - `HashMap` `(amortized O(1))` would be faster than `Map` `(O(log n))` for variable lookup since variable names don't need ordering, but I chose `Map` because `HashMap` is external (`unordered-containers`), whereas `Map` is in base/containers. 
-- Might change this later, as it seems like a drop-in replacement.
+Will be optimized further.
 
 #### Linked Lists 
 - `[Char]` (`String`) is just a linked list of characters, which is inefficient.

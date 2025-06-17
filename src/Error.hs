@@ -1,8 +1,9 @@
 module Error where
 
-import Token
+import Token (Token)
+import Utils (Position)
 
-type String' = (String, (Int, Int))
+type String' = (String, Position)
 
 data ScanError = ScanError String String'
 

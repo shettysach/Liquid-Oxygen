@@ -1,9 +1,11 @@
 module Syntax where
 
-import Data.IORef (IORef)
-import Data.Map   (Map)
+import Data.HashMap.Strict (HashMap)
+import Data.IORef          (IORef)
 
-import Error      (RuntimeError)
+import Data.Word           (Word8)
+import Error               (RuntimeError)
+import Utils               (Position)
 
 data Stmt
   = Expr Expr
@@ -36,17 +38,17 @@ data Literal
   | Bool' Bool
   | Function' LoxFn
   | Class' LoxCls
-  | Instance' LoxCls (IORef (Map String Literal))
-  | NativeFn String Callable Int
+  | Instance' LoxCls (IORef (HashMap String Literal))
+  | NativeFn String Callable Word8
   | Nil
 
-data Env = Env (IORef (Map String Literal)) (Maybe Env)
+data Env = Env (IORef (HashMap String Literal)) (Maybe Env)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
-data LoxFn = LoxFn String' Callable Int Env
+data LoxFn = LoxFn String' Callable Word8 Env
 
-data LoxCls = LoxCls String' (Maybe LoxCls) (Map String LoxFn)
+data LoxCls = LoxCls String' (Maybe LoxCls) (HashMap String LoxFn)
 
 data UnaryOp = Minus' | Bang
 
@@ -66,7 +68,6 @@ data LogicalOp = And | Or
 
 -- Positions for Runtime Error
 
-type Position = (Int, Int)
 type Positioned a = (a, Position)
 
 type Expr' = Positioned Expr

@@ -10,11 +10,12 @@ import Prelude            hiding (head)
 import Error              (ParseError (ParseError))
 import Syntax             as S
 import Token              as T
+import Utils              (Position)
 
 parse :: NonEmpty Token -> Either ParseError [Stmt]
 parse tokens = parse' ([], tokens)
  where
-  parse' (stmts, (fst -> T.Eof) :| _) = Right (reverse stmts)
+  parse' (stmts, fst . head -> T.Eof) = Right (reverse stmts)
   parse' (stmts, tokens')             = declaration tokens' >>= parse' . first (: stmts)
 
 type Parse a = (a, NonEmpty Token) -> Either ParseError (a, NonEmpty Token)
@@ -136,7 +137,7 @@ parameters ps ((fst -> T.Comma) :| rest)          = parameters ps (fromList rest
 parameters ps ((T.Identifier param, pos) :| rest) = parameters ((param, pos) : ps) (fromList rest)
 parameters _ (t :| _)                             = Left $ ParseError "Expected ')', ',' or identifier" t
 
-returnStatement :: (Int, Int) -> Parser Stmt
+returnStatement :: Position -> Parser Stmt
 returnStatement pos ((fst -> T.Semicolon) :| rest) = Right (S.Return (Nothing, pos), fromList rest)
 returnStatement pos tokens = do
   (expr, t :| ts) <- expression tokens

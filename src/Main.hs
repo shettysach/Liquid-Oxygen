@@ -1,6 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
 
-import Control.Arrow      ((&&&))
 import System.Environment (getArgs)
 import System.IO          (hPrint, stderr)
 
@@ -14,23 +13,22 @@ import Scanner            (scan)
 main :: IO ()
 main =
   getArgs >>= \case
-    [file] ->
-      readFile file
-        >>= chainIO scan . Just
-        >>= chainIO parse
-        >>= sequenceA . (id &&& chainIO resolve)
-        >>= endIO interpret
+    [file] -> do
+      source <- readFile file
+      tokens <- chainIO scan $ Just source
+      stmts <- chainIO parse tokens
+      dists <- chainIO resolve stmts
+      endIO interpret stmts dists
     _ -> global >>= repl start
 
-chainIO :: (Show l) => (a -> Either l r) -> Maybe a -> IO (Maybe r)
-chainIO f (Just x) = case f x of
+chainIO :: (Show l) => (x -> Either l r) -> Maybe x -> IO (Maybe r)
+chainIO f mx = case traverse f mx of
   Left l  -> hPrint stderr l >> pure Nothing
-  Right r -> pure $ Just r
-chainIO _ Nothing = pure Nothing
+  Right r -> pure r
 
-endIO :: (Show l) => (a -> b -> IO (Either l ())) -> (Maybe a, Maybe b) -> IO ()
-endIO f (Just x, Just y) =
+endIO :: (Show l) => (x -> y -> IO (Either l ())) -> Maybe x -> Maybe y -> IO ()
+endIO f (Just x) (Just y) =
   f x y >>= \case
     Left l -> hPrint stderr l
-    Right _ -> pure ()
-endIO _ _ = pure ()
+    Right r -> pure r
+endIO _ _ _ = pure ()

@@ -13,12 +13,13 @@ import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE
 import Control.Monad.Trans.State  (StateT (runStateT), get)
 import Data.Foldable              (foldrM)
 import Data.Functor               ((<&>))
+import Data.HashMap.Strict        qualified as HashMap
 import Data.IORef                 (modifyIORef, newIORef, readIORef)
-import Data.Map                   qualified as Map
 
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Syntax
+import Utils                      (lengthW)
 
 interpret :: [Stmt] -> Distances -> IO (Either RuntimeError ())
 interpret stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
@@ -39,7 +40,7 @@ interpretStmts (stmt : stmts) dists env = case stmt of
   Return (Nothing, _) -> evaluate (Literal Nil) dists env <&> second parent
   Block stmts' ->
     liftIO (child env) >>= interpretStmts stmts' dists >>= \case
-      (Nil, _) -> interpretStmts stmts dists env
+      (Nil, env') -> interpretStmts stmts dists $ parent env'
       (lit, env') -> pure (lit, env')
   Print expr -> do
     (literal, env') <- evaluate expr dists env
@@ -69,12 +70,12 @@ interpretStmts (stmt : stmts) dists env = case stmt of
       Class' super' -> pure $ Just super'
       _             -> throwE $ RuntimeError "Superclass must be a class" name
     envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
-    methods' <- liftIO $ mapMethods methods dists envS Map.empty
+    methods' <- liftIO $ mapMethods methods dists envS HashMap.empty
     let klass = LoxCls name super' methods'
     envC <- liftIO $ initialize (fst name) (Class' klass) env'
     interpretStmts stmts dists envC
   Class name Nothing methods -> do
-    methods' <- liftIO $ mapMethods methods dists env Map.empty
+    methods' <- liftIO $ mapMethods methods dists env HashMap.empty
     let klass = LoxCls name Nothing methods'
     envC <- liftIO $ initialize (fst name) (Class' klass) env
     interpretStmts stmts dists envC
@@ -85,15 +86,15 @@ interpretFunction (Function name params body) dists closure =
         child env
           >>= foldrM (uncurry initialize) `flip` zip (map fst params) args
           >>= runExceptT . interpretStmts body dists
-      func = LoxFn name callable (length params) closure
+      func = LoxFn name callable (lengthW params) closure
    in pure (fst name, Function' func)
 interpretFunction _ _ _ = undefined
 
-mapMethods :: [Stmt] -> Distances -> Env -> Map.Map String LoxFn -> IO (Map.Map String LoxFn)
+mapMethods :: [Stmt] -> Distances -> Env -> HashMap.HashMap String LoxFn -> IO (HashMap.HashMap String LoxFn)
 mapMethods [] _ _ mthds = pure mthds
 mapMethods (m : ms) dists closure mthds = do
   (name, Function' func) <- interpretFunction m dists closure
-  mapMethods ms dists closure $ Map.insert name func mthds
+  mapMethods ms dists closure $ HashMap.insert name func mthds
 
 type Eval = ExceptT RuntimeError (StateT Env IO)
 
@@ -133,7 +134,7 @@ evalExpr expr dists = case expr of
     case instance' of
       Instance' klass fRef -> do
         fields <- liftIO $ readIORef fRef
-        case Map.lookup (fst field) fields of
+        case HashMap.lookup (fst field) fields of
           Just property -> pure property
           Nothing       -> findMethod (Just klass) field instance' <&> Function'
       literal -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
@@ -141,7 +142,7 @@ evalExpr expr dists = case expr of
     inst <- evalExpr instExpr dists
     val <- evalExpr rhs dists
     case inst of
-      Instance' _ fRef -> liftIO $ modifyIORef fRef $ Map.insert (fst field) val
+      Instance' _ fRef -> liftIO $ modifyIORef fRef $ HashMap.insert (fst field) val
       literal          -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
     pure val
   This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
@@ -154,14 +155,14 @@ evalExpr expr dists = case expr of
 
 callFunction :: LoxFn -> [Literal] -> Eval Literal
 callFunction (LoxFn name func arity closure) args =
-  if length args /= arity
+  if lengthW args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else ExceptT . fmap (fmap fst) . liftIO $ func args closure
 
 callClass :: LoxCls -> [Literal] -> Eval Literal
 callClass klass@(LoxCls name super methods) args = do
-  instance' <- liftIO $ newIORef Map.empty <&> Instance' klass
-  case Map.lookup "init" methods of
+  instance' <- liftIO $ newIORef HashMap.empty <&> Instance' klass
+  case HashMap.lookup "init" methods of
     Just func -> initInstance func name args instance'
     Nothing ->
       lift (runExceptT $ findMethod super ("init", snd name) instance') >>= \case
@@ -171,7 +172,7 @@ callClass klass@(LoxCls name super methods) args = do
 
 initInstance :: LoxFn -> String' -> [Literal] -> Literal -> Eval Literal
 initInstance (LoxFn _ initr arity closure) name args instance' =
-  if length args /= arity
+  if lengthW args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else liftIO $ child closure >>= initialize "this" instance' >>= liftIO . initr args >> pure instance'
 
@@ -202,9 +203,10 @@ visitBinary (Plus, _) (String' l) (String' r) = pure $ String' $ l ++ r
 visitBinary (op, pos) _ _ = throwE $ RuntimeError "Invalid operands" (show op, pos)
 
 findMethod :: Maybe LoxCls -> String' -> Literal -> Eval LoxFn
-findMethod (Just (LoxCls _ super methods)) field inst = case Map.lookup (fst field) methods of
-  Just mthd -> bindThis mthd inst
-  Nothing   -> findMethod super field inst
+findMethod (Just (LoxCls _ super methods)) field inst =
+  case HashMap.lookup (fst field) methods of
+    Just mthd -> bindThis mthd inst
+    Nothing   -> findMethod super field inst
 findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
 
 bindThis :: LoxFn -> Literal -> Eval LoxFn

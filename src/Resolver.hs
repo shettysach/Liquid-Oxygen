@@ -6,16 +6,16 @@
 
 module Resolver where
 
-import Control.Arrow      ((&&&))
-import Control.Monad      ((>=>))
-import Data.Foldable      (foldrM)
-import Data.Functor       ((<&>))
-import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.Map           qualified as Map
-import Data.Maybe         (isJust)
+import Control.Arrow       ((&&&))
+import Control.Monad       ((>=>))
+import Data.Foldable       (foldrM)
+import Data.Functor        ((<&>))
+import Data.HashMap.Strict qualified as HashMap
+import Data.List.NonEmpty  (NonEmpty ((:|)))
+import Data.Maybe          (isJust)
 
 import Environment
-import Error              (ResolveError (ResolveError))
+import Error               (ResolveError (ResolveError))
 import Syntax
 
 data FunctionType = NonF | Fun | Mthd | Init
@@ -25,10 +25,10 @@ data ClassType = NonC | Sup | Sub
 type State = (FunctionType, ClassType, Distances, NonEmpty Scope)
 
 resolve :: [Stmt] -> Either ResolveError Distances
-resolve stmts = thd4 <$> resolveStmts stmts (NonF, NonC, Map.empty, start)
+resolve stmts = thd4 <$> resolveStmts stmts (NonF, NonC, HashMap.empty, start)
 
 replResolve :: [Stmt] -> NonEmpty Scope -> Either ResolveError (Distances, NonEmpty Scope)
-replResolve stmts stack = (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, Map.empty, stack)
+replResolve stmts stack = (thd4 &&& fth4) <$> resolveStmts stmts (NonF, NonC, HashMap.empty, stack)
 
 resolveStmts :: [Stmt] -> State -> Either ResolveError State
 resolveStmts [] state = Right state
@@ -75,12 +75,12 @@ resolveFunction (Function name params stmts') ntype (ftype, ctype, dists, stack)
   declareDefine name stack
     >>= (foldrM declareDefine `flip` params) . begin
     >>= resolveStmts stmts' . (ntype,ctype,dists,)
-    <&> first4 (const ftype) . fourth4 end
+    <&> (first4 . const) ftype . fourth4 end
 resolveFunction _ _ _ = undefined
 
 resolveMethod :: Stmt -> State -> Either ResolveError State
-resolveMethod mthd@(Function ("init", _) _ _) = resolveFunction mthd Init
-resolveMethod mthd                            = resolveFunction mthd Mthd
+resolveMethod mthd@(Function (fst -> "init") _ _) = resolveFunction mthd Init
+resolveMethod mthd                                = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> State -> Either ResolveError State
 resolveExpr (Literal _) state               = Right state
@@ -103,10 +103,10 @@ resolveExpr (Super pos mthd) state          = resolveLocal ("super", pos) state 
 resolveLocal :: String' -> State -> Either ResolveError State
 resolveLocal name state
   | scope :| _ <- fth4 state
-  , Just False <- Map.lookup (fst name) scope =
+  , Just False <- HashMap.lookup (fst name) scope =
       Left $ ResolveError "Can't read local variable in own init" name
 resolveLocal name state = pure $ case calcDistance (fst name) (fth4 state) of
-  Just dist -> third4 (Map.insert name dist) state
+  Just dist -> third4 (HashMap.insert name dist) state
   Nothing   -> state
 
 -- Quadruples
