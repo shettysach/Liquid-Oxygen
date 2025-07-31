@@ -8,9 +8,9 @@ import Data.List.NonEmpty (NonEmpty ((:|)), fromList, head)
 import Prelude            hiding (head)
 
 import Error              (ParseError (ParseError))
+import Position           (Position)
 import Syntax             as S
 import Token              as T
-import Utils              (Position)
 
 parse :: NonEmpty Token -> Either ParseError [Stmt]
 parse tokens = parse' ([], tokens)
@@ -26,7 +26,7 @@ type Parser a = NonEmpty Token -> Either ParseError (a, NonEmpty Token)
 declaration :: Parser Stmt
 declaration (t :| ts) = case fst t of
   T.Var       -> varDeclaration ts'
-  T.Fun       -> function ts'
+  T.Fun       -> first S.Function <$> function ts'
   T.Class     -> classDeclaration ts'
   T.Return    -> returnStatement (snd t) ts'
   T.LeftBrace -> first S.Block <$> block ([], ts')
@@ -118,7 +118,7 @@ for ((fst -> T.LeftParen) :| t : ts) = do
   Right (loop, afterStmt)
 for (t :| _) = Left $ ParseError "Expected '(' after 'for'" t
 
-function :: Parser Stmt
+function :: Parser CompFn
 function ((T.Identifier name, pos) :| (fst -> T.LeftParen) : rest) = do
   (params, t :| ts) <- parameters [] (fromList rest)
   when (length params >= 255) (Left $ ParseError ">= 255 params" t)
@@ -128,7 +128,7 @@ function ((T.Identifier name, pos) :| (fst -> T.LeftParen) : rest) = do
       T.LeftBrace -> block ([], fromList ts)
       _           -> Left $ ParseError "Expected '{' after params" t
 
-  Right (S.Function (name, pos) params body, afterBody)
+  Right (S.CompFn (name, pos) params body, afterBody)
 function (t :| _) = Left $ ParseError "Expected identifier" t
 
 parameters :: [String'] -> Parser [String']
@@ -158,7 +158,7 @@ classDeclaration ((T.Identifier name, pos) :| ts) = do
     afterSuper'              -> Left $ ParseError "Expected '{' before class body" (head afterSuper')
 classDeclaration (t :| _) = Left $ ParseError "Expected class name" t
 
-method :: Parse [Stmt]
+method :: ([CompFn], NonEmpty Token) -> Either ParseError ([CompFn], NonEmpty Token)
 method (mthds, t :| ts) | T.RightBrace <- fst t = Right (reverse mthds, fromList ts)
 method (mthds, tokens) = function tokens >>= method . first (: mthds)
 

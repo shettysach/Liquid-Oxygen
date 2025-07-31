@@ -5,7 +5,7 @@ import Data.IORef          (IORef)
 
 import Data.Word           (Word8)
 import Error               (RuntimeError)
-import Utils               (Position)
+import Position            (Position)
 
 data Stmt
   = Expr Expr
@@ -14,9 +14,11 @@ data Stmt
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
-  | Function String' [String'] [Stmt]
+  | Function CompFn
   | Return (Maybe' Expr)
-  | Class String' (Maybe Expr) [Stmt]
+  | Class String' (Maybe Expr) [CompFn]
+
+data CompFn = CompFn String' [String'] [Stmt]
 
 data Expr
   = Literal Literal

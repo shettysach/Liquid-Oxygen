@@ -6,7 +6,7 @@
 module Interpreter where
 
 import Control.Arrow              (second)
-import Control.Monad              (void)
+import Control.Monad              (join, void)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Class  (lift)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE)
@@ -15,11 +15,10 @@ import Data.Foldable              (foldrM)
 import Data.Functor               ((<&>))
 import Data.HashMap.Strict        qualified as HashMap
 import Data.IORef                 (modifyIORef, newIORef, readIORef)
-
 import Environment
 import Error                      (RuntimeError (RuntimeError))
+import Position                   (lengthW)
 import Syntax
-import Utils                      (lengthW)
 
 interpret :: [Stmt] -> Distances -> IO (Either RuntimeError ())
 interpret stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
@@ -60,9 +59,9 @@ interpretStmts (stmt : stmts) dists env = case stmt of
       if isTruthy cond'
         then interpretStmts [stmt'] dists envC >>= while . snd
         else interpretStmts stmts dists envC
-  Function{} -> mdo
+  Function fn -> mdo
     closure <- lift $ initialize name func env
-    (name, func) <- lift $ interpretFunction stmt dists closure
+    (name, func) <- lift $ interpretFunction fn dists closure
     interpretStmts stmts dists closure
   Class name (Just super) methods -> do
     (superLit, env') <- evaluate super dists env
@@ -80,17 +79,16 @@ interpretStmts (stmt : stmts) dists env = case stmt of
     envC <- liftIO $ initialize (fst name) (Class' klass) env
     interpretStmts stmts dists envC
 
-interpretFunction :: Stmt -> Distances -> Env -> IO (String, Literal)
-interpretFunction (Function name params body) dists closure =
+interpretFunction :: CompFn -> Distances -> Env -> IO (String, Literal)
+interpretFunction ((CompFn name params body)) dists closure =
   let callable args env =
         child env
           >>= foldrM (uncurry initialize) `flip` zip (map fst params) args
           >>= runExceptT . interpretStmts body dists
       func = LoxFn name callable (lengthW params) closure
    in pure (fst name, Function' func)
-interpretFunction _ _ _ = undefined
 
-mapMethods :: [Stmt] -> Distances -> Env -> HashMap.HashMap String LoxFn -> IO (HashMap.HashMap String LoxFn)
+mapMethods :: [CompFn] -> Distances -> Env -> HashMap.HashMap String LoxFn -> IO (HashMap.HashMap String LoxFn)
 mapMethods [] _ _ mthds = pure mthds
 mapMethods (m : ms) dists closure mthds = do
   (name, Function' func) <- interpretFunction m dists closure
@@ -112,15 +110,9 @@ evalExpr expr dists = case expr of
     val <- evalExpr rhs dists
     dist <- except $ getDistance var dists
     lift get >>= liftIO . assignAt var val dist >> pure val
-  Unary op right -> evalExpr right dists >>= visitUnary op
-  Binary op left right -> do
-    l <- evalExpr left dists
-    r <- evalExpr right dists
-    visitBinary op l r
-  Logical op left right -> do
-    l <- evalExpr left dists
-    r <- evalExpr right dists
-    visitLogical op l r
+  Unary op right -> visitUnary op =<< evalExpr right dists
+  Binary op left right -> join $ visitBinary op <$> evalExpr left dists <*> evalExpr right dists
+  Logical op left right -> join $ visitLogical op <$> evalExpr left dists <*> evalExpr right dists
   Call (callee, pos) argExprs -> do
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)

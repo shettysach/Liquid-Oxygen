@@ -16,14 +16,15 @@ executable liquid-oxygen
       Error
       Interpreter
       Parser
+      Position
       Repl
       Resolver
       Scanner
       Syntax
       Token
-      Utils
     build-depends:    
       base ^>=4.19.2.0,
+      lens,
       unordered-containers,
       transformers,
       time

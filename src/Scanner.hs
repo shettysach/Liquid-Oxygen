@@ -4,8 +4,8 @@ import Data.Char          (isAlpha, isAlphaNum, isDigit)
 import Data.List.NonEmpty (NonEmpty, fromList, (<|))
 
 import Error              (ScanError (ScanError))
+import Position           (Position, lengthW)
 import Token
-import Utils              (Position, lengthW)
 
 scan :: String -> Either ScanError (NonEmpty Token)
 scan source = scan' source (1, 1)

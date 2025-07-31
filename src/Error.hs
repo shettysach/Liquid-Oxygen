@@ -1,7 +1,7 @@
 module Error where
 
-import Token (Token)
-import Utils (Position)
+import Position (Position)
+import Token    (Token)
 
 type String' = (String, Position)
 

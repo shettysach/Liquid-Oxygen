@@ -12,8 +12,8 @@ import Interpreter                (evaluate, replInterpret)
 import Parser                     (expression, parse)
 import Resolver                   (replResolve)
 import Scanner                    (scan)
-import Syntax                     as S
-import Token                      as T
+import Syntax                     (Env, Expr, Stmt (Expr))
+import Token                      (Token, TokenType (LeftBrace, RightBrace))
 
 repl :: NonEmpty Scope -> Env -> IO ()
 repl scopes env = do
@@ -42,12 +42,12 @@ runStmts stmts scopes env = case replResolve stmts scopes of
       Right env' -> pure (scopes', env')
 
 runExpr :: Expr -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
-runExpr expr scopes env = case replResolve [S.Expr expr] scopes of
+runExpr expr scopes env = case replResolve [Expr expr] scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right (dists', scopes') ->
     runExceptT (evaluate expr dists' env) >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
-      Right (val, env') -> print val >> pure (scopes', env')
+      Right (lit, env') -> print lit >> pure (scopes', env')
 
 readMultiline :: IO (Either ScanError String)
 readMultiline = do
@@ -63,7 +63,7 @@ readMultiline = do
 readBlock :: [String] -> Int -> IO (Either ScanError String)
 readBlock acc 0 = pure $ Right $ unlines $ reverse acc
 readBlock acc n = do
-  putStr " ∙ "
+  putStr "∙ "
   hFlush stdout
   next <- getLine
   case scan next of
@@ -73,6 +73,6 @@ readBlock acc n = do
 braceCount :: NonEmpty Token -> Int
 braceCount = sum . fmap delta
  where
-  delta (T.LeftBrace, _)  = 1
-  delta (T.RightBrace, _) = -1
-  delta _                 = 0
+  delta (LeftBrace, _)  = 1
+  delta (RightBrace, _) = -1
+  delta _               = 0

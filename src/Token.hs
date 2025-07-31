@@ -1,6 +1,6 @@
 module Token where
 
-import Utils (Position)
+import Position (Position)
 
 type Token = (TokenType, Position)
 

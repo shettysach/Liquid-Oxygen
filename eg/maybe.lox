@@ -1,0 +1,37 @@
+class Just {
+  init(value) { this.value = value; }
+
+  bind(fn) { return fn(this.value); }
+
+  toString() { return this.value; }
+}
+
+class Nothing {
+  bind(fn) { return this; }
+
+  toString() { return "Nothing"; }
+}
+
+fun maybe(value) {
+  if (value == nil) return Nothing();
+  return Just(value);
+}
+
+fun reciprocal(x) {
+  if (x == 0) return Nothing();
+  return maybe(1 / x);
+}
+
+fun increment(x) { return maybe(x + 1); }
+
+var a = maybe(4)
+    .bind(reciprocal)
+    .bind(increment);
+
+print a.toString();
+
+var b = maybe(0)
+    .bind(reciprocal)
+    .bind(increment);
+
+print b.toString();

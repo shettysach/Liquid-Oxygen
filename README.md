@@ -1,4 +1,4 @@
-## liquid-oxygen
+## Liquid-Oxygen
 
 A tree-walk interpreter for the Lox language, based on the first half of the book, Crafting Interpreters by Robert Nystorm.
 
@@ -36,7 +36,3 @@ Will be optimized further.
 #### Initialize vs Assign
 - Only `modifyIORef` (lazy) works for `initialize` due to Functions, because closures depend on lazily init envs and may involve cyclic refs (`mdo` / `fixIO`).
 - `atomicModifyIORef` (strict) seems to work safely for `assignAt`, since assignment happens after eval and does not involve cyclic structs.
-
-#### Why the name?
-
-https://en.wikipedia.org/wiki/Liquid_oxygen
