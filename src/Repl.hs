@@ -8,7 +8,7 @@ import System.IO                  (hFlush, hPrint, stderr, stdout)
 
 import Environment                (Scope)
 import Error                      (ScanError)
-import Interpreter                (evaluate, replInterpret)
+import Interpreter                (evaluate, interpretRepl)
 import Parser                     (expression, parse)
 import Resolver                   (resolveRepl)
 import Scanner                    (scan)
@@ -37,7 +37,7 @@ runStmts :: [Stmt] -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
 runStmts stmts scopes env = case resolveRepl stmts scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right (dists', scopes') ->
-    interpretRep stmts dists' env >>= \case
+    interpretRepl stmts dists' env >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
       Right env' -> pure (scopes', env')
 
