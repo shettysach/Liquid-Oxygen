@@ -4,10 +4,10 @@ import System.Environment (getArgs)
 import System.IO          (hPrint, stderr)
 
 import Environment        (global, start)
-import Interpreter        (interpret)
+import Interpreter        (interpretFile)
 import Parser             (parse)
 import Repl               (repl)
-import Resolver           (resolve)
+import Resolver           (resolveFile)
 import Scanner            (scan)
 
 main :: IO ()
@@ -17,8 +17,8 @@ main =
       source <- readFile file
       tokens <- chainIO scan $ Just source
       stmts <- chainIO parse tokens
-      dists <- chainIO resolve stmts
-      endIO interpret stmts dists
+      dists <- chainIO resolveFile stmts
+      endIO interpretFile stmts dists
     _ -> global >>= repl start
 
 chainIO :: (Show l) => (x -> Either l r) -> Maybe x -> IO (Maybe r)

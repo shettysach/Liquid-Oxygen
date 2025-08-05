@@ -6,7 +6,7 @@
 module Interpreter where
 
 import Control.Arrow              (second)
-import Control.Monad              (join, void)
+import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Class  (lift)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE)
@@ -20,11 +20,11 @@ import Error                      (RuntimeError (RuntimeError))
 import Position                   (lengthW)
 import Syntax
 
-interpret :: [Stmt] -> Distances -> IO (Either RuntimeError ())
-interpret stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
+interpretFile :: [Stmt] -> Distances -> IO (Either RuntimeError ())
+interpretFile stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
 
-replInterpret :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
-replInterpret stmts dists env = runExceptT (interpretStmts stmts dists env) <&> fmap snd
+interpretRepl :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
+interpretRepl stmts dists = fmap (fmap snd) . runExceptT . interpretStmts stmts dists
 
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
@@ -104,15 +104,23 @@ evaluate expr dists env = ExceptT $ do
 evalExpr :: Expr -> Distances -> Eval Literal
 evalExpr expr dists = case expr of
   Literal lit -> pure lit
-  Grouping env -> evalExpr env dists
+  Grouping expr' -> evalExpr expr' dists
   Variable var -> lift get >>= ExceptT . liftIO . getAt var dists
   Assignment var rhs -> do
     val <- evalExpr rhs dists
+    env <- lift get
     dist <- except $ getDistance var dists
-    lift get >>= liftIO . assignAt var val dist >> pure val
-  Unary op right -> visitUnary op =<< evalExpr right dists
-  Binary op left right -> join $ visitBinary op <$> evalExpr left dists <*> evalExpr right dists
-  Logical op left right -> join $ visitLogical op <$> evalExpr left dists <*> evalExpr right dists
+    _ <- liftIO $ assignAt var val dist env
+    pure val
+  Unary op right -> evalExpr right dists >>= visitUnary op
+  Binary op left right -> do
+    l <- evalExpr left dists
+    r <- evalExpr right dists
+    visitBinary op l r
+  Logical op left right -> do
+    l <- evalExpr left dists
+    r <- evalExpr right dists
+    visitLogical op l r
   Call (callee, pos) argExprs -> do
     calleeLit <- evalExpr callee dists
     argLits <- mapM (`evalExpr` dists) (reverse argExprs)
@@ -176,8 +184,8 @@ visitLogical op left right = case fst op of
 
 visitUnary :: UnaryOp' -> Literal -> Eval Literal
 visitUnary (Minus', _) (Number' n) = pure $ Number' $ negate n
-visitUnary (Minus', pos) _         = throwE $ RuntimeError "Invalid operand" (show Minus', pos)
 visitUnary (Bang, _) right         = pure $ Bool' $ not $ isTruthy right
+visitUnary (Minus', pos) _         = throwE $ RuntimeError "Invalid operand" (show Minus', pos)
 
 visitBinary :: BinaryOp' -> Literal -> Literal -> Eval Literal
 visitBinary (EqualEqual, _) left right = pure $ Bool' $ left == right
