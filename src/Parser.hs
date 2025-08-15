@@ -118,7 +118,7 @@ for ((fst -> T.LeftParen) :| t : ts) = do
   Right (loop, afterStmt)
 for (t :| _) = Left $ ParseError "Expected '(' after 'for'" t
 
-function :: Parser CompFn
+function :: Parser FnStmt
 function ((T.Identifier name, pos) :| (fst -> T.LeftParen) : rest) = do
   (params, t :| ts) <- parameters [] (fromList rest)
   when (length params >= 255) (Left $ ParseError ">= 255 params" t)
@@ -128,7 +128,7 @@ function ((T.Identifier name, pos) :| (fst -> T.LeftParen) : rest) = do
       T.LeftBrace -> block ([], fromList ts)
       _           -> Left $ ParseError "Expected '{' after params" t
 
-  Right (S.CompFn (name, pos) params body, afterBody)
+  Right (S.FnStmt (name, pos) params body, afterBody)
 function (t :| _) = Left $ ParseError "Expected identifier" t
 
 parameters :: [String'] -> Parser [String']
@@ -158,7 +158,7 @@ classDeclaration ((T.Identifier name, pos) :| ts) = do
     afterSuper'              -> Left $ ParseError "Expected '{' before class body" (head afterSuper')
 classDeclaration (t :| _) = Left $ ParseError "Expected class name" t
 
-method :: ([CompFn], NonEmpty Token) -> Either ParseError ([CompFn], NonEmpty Token)
+method :: ([FnStmt], NonEmpty Token) -> Either ParseError ([FnStmt], NonEmpty Token)
 method (mthds, t :| ts) | T.RightBrace <- fst t = Right (reverse mthds, fromList ts)
 method (mthds, tokens) = function tokens >>= method . first (: mthds)
 

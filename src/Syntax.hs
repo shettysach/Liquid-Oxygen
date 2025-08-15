@@ -14,11 +14,11 @@ data Stmt
   | Block [Stmt]
   | If Expr Stmt (Maybe Stmt)
   | While Expr Stmt
-  | Function CompFn
+  | Function FnStmt
   | Return (Maybe' Expr)
-  | Class String' (Maybe Expr) [CompFn]
+  | Class String' (Maybe Expr) [FnStmt]
 
-data CompFn = CompFn String' [String'] [Stmt]
+data FnStmt = FnStmt String' [String'] [Stmt]
 
 data Expr
   = Literal Literal
@@ -38,9 +38,9 @@ data Literal
   = Number' Double
   | String' String
   | Bool' Bool
-  | Function' LoxFn
-  | Class' LoxCls
-  | Instance' LoxCls (IORef (HashMap String Literal))
+  | Function' FnLit
+  | Class' ClsLit
+  | Instance' ClsLit (IORef (HashMap String Literal))
   | NativeFn String Callable Word8
   | Nil
 
@@ -48,9 +48,9 @@ data Env = Env (IORef (HashMap String Literal)) (Maybe Env)
 
 type Callable = [Literal] -> Env -> IO (Either RuntimeError (Literal, Env))
 
-data LoxFn = LoxFn String' Callable Word8 Env
+data FnLit = FnLit String' Callable Word8 Env
 
-data LoxCls = LoxCls String' (Maybe LoxCls) (HashMap String LoxFn)
+data ClsLit = ClsLit String' (Maybe ClsLit) (HashMap String FnLit)
 
 data UnaryOp = Minus' | Bang
 
@@ -96,17 +96,17 @@ instance Eq Literal where
   Function' l == Function' r = l == r
   _ == _                     = False
 
-instance Eq LoxFn where
-  LoxFn n _ a _ == LoxFn n' _ a' _ = n == n' && a == a'
+instance Eq FnLit where
+  FnLit n _ a _ == FnLit n' _ a' _ = n == n' && a == a'
 
 instance Show Literal where
   show (String' s)                  = s
   show (Number' n)                  = show n
   show (Bool' True)                 = "true"
   show (Bool' False)                = "false"
-  show (Function' (LoxFn f _ _ _))  = "<fn " ++ fst f ++ ">"
-  show (Class' (LoxCls c _ _))      = "<class " ++ fst c ++ ">"
-  show (Instance' (LoxCls c _ _) _) = "<instance " ++ fst c ++ ">"
+  show (Function' (FnLit f _ _ _))  = "<fn " ++ fst f ++ ">"
+  show (Class' (ClsLit c _ _))      = "<class " ++ fst c ++ ">"
+  show (Instance' (ClsLit c _ _) _) = "<instance " ++ fst c ++ ">"
   show NativeFn{}                   = "<native fn>"
   show Nil                          = "nil"
 

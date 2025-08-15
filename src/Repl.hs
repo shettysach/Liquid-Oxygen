@@ -4,15 +4,14 @@ module Repl where
 
 import Control.Monad.Trans.Except (runExceptT)
 import Data.List.NonEmpty         (NonEmpty)
-import System.IO                  (hFlush, hPrint, stderr, stdout)
-
 import Environment                (Scope)
 import Error                      (ScanError)
-import Interpreter                (evaluate, replInterpret)
+import Interpreter                (evaluate, interpretRepl)
 import Parser                     (expression, parse)
-import Resolver                   (replResolve)
+import Resolver                   (resolveRepl)
 import Scanner                    (scan)
 import Syntax                     (Env, Expr, Stmt (Expr))
+import System.IO                  (hFlush, hPrint, stderr, stdout)
 import Token                      (Token, TokenType (LeftBrace, RightBrace))
 
 repl :: NonEmpty Scope -> Env -> IO ()
@@ -34,15 +33,15 @@ runInput input scopes env = case scan input of
       Right expr -> runExpr expr scopes env
 
 runStmts :: [Stmt] -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
-runStmts stmts scopes env = case replResolve stmts scopes of
+runStmts stmts scopes env = case resolveRepl stmts scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right (dists', scopes') ->
-    replInterpret stmts dists' env >>= \case
+    interpretRepl stmts dists' env >>= \case
       Left err -> hPrint stderr err >> pure (scopes, env)
       Right env' -> pure (scopes', env')
 
 runExpr :: Expr -> NonEmpty Scope -> Env -> IO (NonEmpty Scope, Env)
-runExpr expr scopes env = case replResolve [Expr expr] scopes of
+runExpr expr scopes env = case resolveRepl [Expr expr] scopes of
   Left err -> hPrint stderr err >> pure (scopes, env)
   Right (dists', scopes') ->
     runExceptT (evaluate expr dists' env) >>= \case

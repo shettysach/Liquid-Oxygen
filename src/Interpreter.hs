@@ -6,7 +6,7 @@
 module Interpreter where
 
 import Control.Arrow              (second)
-import Control.Monad              (join, void)
+import Control.Monad              (void)
 import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Trans.Class  (lift)
 import Control.Monad.Trans.Except (ExceptT (ExceptT), except, runExceptT, throwE)
@@ -15,16 +15,17 @@ import Data.Foldable              (foldrM)
 import Data.Functor               ((<&>))
 import Data.HashMap.Strict        qualified as HashMap
 import Data.IORef                 (modifyIORef, newIORef, readIORef)
+
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Position                   (lengthW)
 import Syntax
 
-interpret :: [Stmt] -> Distances -> IO (Either RuntimeError ())
-interpret stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
+interpretFile :: [Stmt] -> Distances -> IO (Either RuntimeError ())
+interpretFile stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
 
-replInterpret :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
-replInterpret stmts dists env = runExceptT (interpretStmts stmts dists env) <&> fmap snd
+interpretRepl :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
+interpretRepl stmts dists = fmap (fmap snd) . runExceptT . interpretStmts stmts dists
 
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
@@ -70,59 +71,66 @@ interpretStmts (stmt : stmts) dists env = case stmt of
       _             -> throwE $ RuntimeError "Superclass must be a class" name
     envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
     methods' <- liftIO $ mapMethods methods dists envS HashMap.empty
-    let klass = LoxCls name super' methods'
+    let klass = ClsLit name super' methods'
     envC <- liftIO $ initialize (fst name) (Class' klass) env'
     interpretStmts stmts dists envC
   Class name Nothing methods -> do
     methods' <- liftIO $ mapMethods methods dists env HashMap.empty
-    let klass = LoxCls name Nothing methods'
+    let klass = ClsLit name Nothing methods'
     envC <- liftIO $ initialize (fst name) (Class' klass) env
     interpretStmts stmts dists envC
 
-interpretFunction :: CompFn -> Distances -> Env -> IO (String, Literal)
-interpretFunction ((CompFn name params body)) dists closure =
+interpretFunction :: FnStmt -> Distances -> Env -> IO (String, Literal)
+interpretFunction ((FnStmt name params body)) dists closure =
   let callable args env =
         child env
           >>= foldrM (uncurry initialize) `flip` zip (map fst params) args
           >>= runExceptT . interpretStmts body dists
-      func = LoxFn name callable (lengthW params) closure
+      func = FnLit name callable (lengthW params) closure
    in pure (fst name, Function' func)
 
-mapMethods :: [CompFn] -> Distances -> Env -> HashMap.HashMap String LoxFn -> IO (HashMap.HashMap String LoxFn)
+mapMethods :: [FnStmt] -> Distances -> Env -> HashMap.HashMap String FnLit -> IO (HashMap.HashMap String FnLit)
 mapMethods [] _ _ mthds = pure mthds
 mapMethods (m : ms) dists closure mthds = do
   (name, Function' func) <- interpretFunction m dists closure
   mapMethods ms dists closure $ HashMap.insert name func mthds
 
-type Eval = ExceptT RuntimeError (StateT Env IO)
-
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 evaluate expr dists env = ExceptT $ do
-  (result, env') <- runStateT (runExceptT $ evalExpr expr dists) env
-  pure $ result <&> (,env')
+  (result, state) <- runStateT (runExceptT $ evalExpr expr) (dists, env)
+  pure $ result <&> (,snd state)
 
-evalExpr :: Expr -> Distances -> Eval Literal
-evalExpr expr dists = case expr of
+type EnvState = ExceptT RuntimeError (StateT (Distances, Env) IO)
+
+evalExpr :: Expr -> EnvState Literal
+evalExpr expr = case expr of
   Literal lit -> pure lit
-  Grouping env -> evalExpr env dists
-  Variable var -> lift get >>= ExceptT . liftIO . getAt var dists
+  Grouping expr' -> evalExpr expr'
+  Variable var -> lift get >>= ExceptT . liftIO . uncurry (getAt var)
   Assignment var rhs -> do
-    val <- evalExpr rhs dists
+    val <- evalExpr rhs
+    (dists, env) <- lift get
     dist <- except $ getDistance var dists
-    lift get >>= liftIO . assignAt var val dist >> pure val
-  Unary op right -> visitUnary op =<< evalExpr right dists
-  Binary op left right -> join $ visitBinary op <$> evalExpr left dists <*> evalExpr right dists
-  Logical op left right -> join $ visitLogical op <$> evalExpr left dists <*> evalExpr right dists
+    liftIO $ assignAt var val dist env >> pure val
+  Unary op right -> evalExpr right >>= evalUnary op
+  Binary op left right -> do
+    l <- evalExpr left
+    r <- evalExpr right
+    evalBinary op l r
+  Logical op left right -> do
+    l <- evalExpr left
+    r <- evalExpr right
+    evalLogical op l r
   Call (callee, pos) argExprs -> do
-    calleeLit <- evalExpr callee dists
-    argLits <- mapM (`evalExpr` dists) (reverse argExprs)
+    calleeLit <- evalExpr callee
+    argLits <- mapM evalExpr (reverse argExprs)
     case calleeLit of
       Function' func           -> callFunction func argLits
-      NativeFn name func arity -> callFunction (LoxFn (name, pos) func arity undefined) argLits
+      NativeFn name func arity -> callFunction (FnLit (name, pos) func arity undefined) argLits
       Class' klass             -> callClass klass argLits
       literal                  -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
   Get instExpr field -> do
-    instance' <- evalExpr instExpr dists
+    instance' <- evalExpr instExpr
     case instance' of
       Instance' klass fRef -> do
         fields <- liftIO $ readIORef fRef
@@ -131,28 +139,28 @@ evalExpr expr dists = case expr of
           Nothing       -> findMethod (Just klass) field instance' <&> Function'
       literal -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
   Set instExpr field rhs -> do
-    inst <- evalExpr instExpr dists
-    val <- evalExpr rhs dists
+    inst <- evalExpr instExpr
+    val <- evalExpr rhs
     case inst of
       Instance' _ fRef -> liftIO $ modifyIORef fRef $ HashMap.insert (fst field) val
       literal          -> throwE $ RuntimeError "Only instances have properties/methods" (show literal, snd field)
     pure val
-  This pos -> lift get >>= ExceptT . liftIO . getAt ("this", pos) dists
+  This pos -> lift get >>= ExceptT . liftIO . uncurry (getAt ("this", pos))
   Super pos method -> do
-    env <- lift get
+    (dists, env) <- lift get
     dist <- except $ getDistance ("super", pos) dists
     Class' super <- ExceptT . liftIO . getHere ("super", pos) $ ancestor env dist
     instance' <- ExceptT . liftIO . getHere ("this", pos) $ ancestor env (dist - 1)
     findMethod (Just super) method instance' <&> Function'
 
-callFunction :: LoxFn -> [Literal] -> Eval Literal
-callFunction (LoxFn name func arity closure) args =
-  if lengthW args /= arity
-    then throwE $ RuntimeError ("Arity /= " ++ show arity) name
-    else ExceptT . fmap (fmap fst) . liftIO $ func args closure
+callFunction :: FnLit -> [Literal] -> EnvState Literal
+callFunction (FnLit name func arity closure) args =
+  if lengthW args == arity
+    then ExceptT . (fmap . fmap) fst . liftIO $ func args closure
+    else throwE $ RuntimeError ("Arity /= " ++ show arity) name
 
-callClass :: LoxCls -> [Literal] -> Eval Literal
-callClass klass@(LoxCls name super methods) args = do
+callClass :: ClsLit -> [Literal] -> EnvState Literal
+callClass klass@(ClsLit name super methods) args = do
   instance' <- liftIO $ newIORef HashMap.empty <&> Instance' klass
   case HashMap.lookup "init" methods of
     Just func -> initInstance func name args instance'
@@ -162,27 +170,27 @@ callClass klass@(LoxCls name super methods) args = do
         Left _ | null args -> pure instance'
         Left err -> throwE err
 
-initInstance :: LoxFn -> String' -> [Literal] -> Literal -> Eval Literal
-initInstance (LoxFn _ initr arity closure) name args instance' =
+initInstance :: FnLit -> String' -> [Literal] -> Literal -> EnvState Literal
+initInstance (FnLit _ initr arity closure) name args instance' =
   if lengthW args /= arity
     then throwE $ RuntimeError ("Arity /= " ++ show arity) name
     else liftIO $ child closure >>= initialize "this" instance' >>= liftIO . initr args >> pure instance'
 
-visitLogical :: LogicalOp' -> Literal -> Literal -> Eval Literal
-visitLogical op left right = case fst op of
+evalLogical :: LogicalOp' -> Literal -> Literal -> EnvState Literal
+evalLogical op left right = case fst op of
   Or | isTruthy left        -> pure left
   And | not $ isTruthy left -> pure left
   _                         -> pure right
 
-visitUnary :: UnaryOp' -> Literal -> Eval Literal
-visitUnary (Minus', _) (Number' n) = pure $ Number' $ negate n
-visitUnary (Minus', pos) _         = throwE $ RuntimeError "Invalid operand" (show Minus', pos)
-visitUnary (Bang, _) right         = pure $ Bool' $ not $ isTruthy right
+evalUnary :: UnaryOp' -> Literal -> EnvState Literal
+evalUnary (Minus', _) (Number' n) = pure $ Number' $ negate n
+evalUnary (Bang, _) right         = pure $ Bool' $ not $ isTruthy right
+evalUnary (Minus', pos) _         = throwE $ RuntimeError "Invalid operand" (show Minus', pos)
 
-visitBinary :: BinaryOp' -> Literal -> Literal -> Eval Literal
-visitBinary (EqualEqual, _) left right = pure $ Bool' $ left == right
-visitBinary (BangEqual, _) left right = pure $ Bool' $ left /= right
-visitBinary (op, _) (Number' l) (Number' r) = pure $ case op of
+evalBinary :: BinaryOp' -> Literal -> Literal -> EnvState Literal
+evalBinary (EqualEqual, _) left right = pure $ Bool' $ left == right
+evalBinary (BangEqual, _) left right = pure $ Bool' $ left /= right
+evalBinary (op, _) (Number' l) (Number' r) = pure $ case op of
   Minus        -> Number' $ l - r
   Slash        -> Number' $ l / r
   Star         -> Number' $ l * r
@@ -191,15 +199,15 @@ visitBinary (op, _) (Number' l) (Number' r) = pure $ case op of
   GreaterEqual -> Bool' $ l >= r
   Less         -> Bool' $ l < r
   LessEqual    -> Bool' $ l <= r
-visitBinary (Plus, _) (String' l) (String' r) = pure $ String' $ l ++ r
-visitBinary (op, pos) _ _ = throwE $ RuntimeError "Invalid operands" (show op, pos)
+evalBinary (Plus, _) (String' l) (String' r) = pure $ String' $ l ++ r
+evalBinary (op, pos) _ _ = throwE $ RuntimeError "Invalid operands" (show op, pos)
 
-findMethod :: Maybe LoxCls -> String' -> Literal -> Eval LoxFn
-findMethod (Just (LoxCls _ super methods)) field inst =
+findMethod :: Maybe ClsLit -> String' -> Literal -> EnvState FnLit
+findMethod (Just (ClsLit _ super methods)) field inst =
   case HashMap.lookup (fst field) methods of
     Just mthd -> bindThis mthd inst
     Nothing   -> findMethod super field inst
 findMethod Nothing field _ = throwE $ RuntimeError "Undefined field" field
 
-bindThis :: LoxFn -> Literal -> Eval LoxFn
-bindThis (LoxFn name func arity closure) instance' = liftIO $ child closure >>= initialize "this" instance' <&> LoxFn name func arity
+bindThis :: FnLit -> Literal -> EnvState FnLit
+bindThis (FnLit name func arity closure) instance' = liftIO $ child closure >>= initialize "this" instance' <&> FnLit name func arity

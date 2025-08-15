@@ -1,5 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE ViewPatterns        #-}
 
@@ -10,8 +11,8 @@ import Control.Lens
 import Control.Monad       ((>=>))
 import Data.Foldable       (foldrM)
 import Data.HashMap.Strict qualified as HashMap
-import Data.List.NonEmpty  (NonEmpty ((:|)))
-import Data.Maybe          (isJust)
+import Data.List.NonEmpty  (NonEmpty, head)
+import Prelude             hiding (head)
 
 import Environment
 import Error               (ResolveError (ResolveError))
@@ -21,13 +22,20 @@ data FunctionType = NonF | Fun | Mthd | Init
 
 data ClassType = NonC | Sup | Sub
 
-type ResState = (FunctionType, ClassType, Distances, NonEmpty Scope)
+data ResState = ResState
+  { _ftype :: FunctionType
+  , _ctype :: ClassType
+  , _dists :: Distances
+  , _stack :: NonEmpty Scope
+  }
 
-resolve :: [Stmt] -> Either ResolveError Distances
-resolve stmts = view dists <$> resolveStmts stmts (NonF, NonC, HashMap.empty, start)
+makeLenses ''ResState
 
-replResolve :: [Stmt] -> NonEmpty Scope -> Either ResolveError (Distances, NonEmpty Scope)
-replResolve stmts stack_ = (view dists &&& view stack) <$> resolveStmts stmts (NonF, NonC, HashMap.empty, stack_)
+resolveFile :: [Stmt] -> Either ResolveError Distances
+resolveFile stmts = view dists <$> resolveStmts stmts (ResState NonF NonC HashMap.empty start)
+
+resolveRepl :: [Stmt] -> NonEmpty Scope -> Either ResolveError (Distances, NonEmpty Scope)
+resolveRepl stmts = fmap (view dists &&& view stack) . resolveStmts stmts . ResState NonF NonC HashMap.empty
 
 resolveStmts :: [Stmt] -> ResState -> Either ResolveError ResState
 resolveStmts [] state = Right state
@@ -38,8 +46,8 @@ resolveStmts (stmt : stmts) state = case stmt of
       >>= resolveExpr expr . flip (set stack) state
       >>= resolveStmts stmts . over stack (define $ fst name)
   Var name Nothing -> declareDefine name (view stack state) >>= resolveStmts stmts . flip (set stack) state
-  Return mExpr | NonF <- view ftype state -> Left $ ResolveError "Top level return" ("return", snd mExpr)
-  Return mExpr | Init <- view ftype state, isJust $ fst mExpr -> Left $ ResolveError "Can't return value from init" ("return", snd mExpr)
+  Return (_, pos) | NonF <- view ftype state -> Left $ ResolveError "Top level return" ("return", pos)
+  Return (Just _, pos) | Init <- view ftype state -> Left $ ResolveError "Can't return value from init" ("return", pos)
   Return (Just expr, _) -> resolveExpr expr state >>= resolveStmts stmts
   Return (Nothing, _) -> resolveStmts stmts state
   Block stmts' -> resolveStmts stmts' (over stack begin state) >>= resolveStmts stmts . over stack end
@@ -59,26 +67,28 @@ resolveStmts (stmt : stmts) state = case stmt of
   Class name (Just (Variable name')) _ | fst name == fst name' -> Left $ ResolveError "Can't inherit from self" name'
   Class name (Just super) methods ->
     declareDefine name (view stack state)
-      >>= resolveExpr super . (view ftype state,Sub,view dists state,)
+      <&> set stack `flip` set ctype Sub state
+      >>= resolveExpr super
       <&> over stack (define "this" . begin . define "super" . begin)
       >>= foldrM resolveMethod `flip` methods
       >>= resolveStmts stmts . set ctype (view ctype state) . over stack (end . end)
   Class name Nothing methods ->
     declareDefine name (view stack state)
-      <&> (view ftype state,Sup,view dists state,) . define "this" . begin
+      <&> over stack (define "this" . begin)
+        . (set stack `flip` set ctype Sup state)
       >>= foldrM resolveMethod `flip` methods
       >>= resolveStmts stmts . set ctype (view ctype state) . over stack end
 
-resolveFunction :: CompFn -> FunctionType -> ResState -> Either ResolveError ResState
-resolveFunction (CompFn name params stmts) ntype state =
+resolveFunction :: FnStmt -> FunctionType -> ResState -> Either ResolveError ResState
+resolveFunction (FnStmt name params stmts) ntype state =
   declareDefine name (view stack state)
     >>= flip (foldrM declareDefine) params . begin
-    >>= resolveStmts stmts . (ntype,view ctype state,view dists state,)
-    <&> (over ftype . const) (view ftype state) . over stack end
+    >>= resolveStmts stmts . ResState ntype (view ctype state) (view dists state)
+    <&> set ftype (view ftype state) . over stack end
 
-resolveMethod :: CompFn -> ResState -> Either ResolveError ResState
-resolveMethod mthd@(CompFn (fst -> "init") _ _) = resolveFunction mthd Init
-resolveMethod mthd                              = resolveFunction mthd Mthd
+resolveMethod :: FnStmt -> ResState -> Either ResolveError ResState
+resolveMethod mthd@(FnStmt ("init", _) _ _) = resolveFunction mthd Init
+resolveMethod mthd                          = resolveFunction mthd Mthd
 
 resolveExpr :: Expr -> ResState -> Either ResolveError ResState
 resolveExpr (Literal _) state                     = Right state
@@ -100,21 +110,8 @@ resolveExpr (Super pos mthd) state                = resolveLocal ("super", pos) 
 
 resolveLocal :: String' -> ResState -> Either ResolveError ResState
 resolveLocal name state
-  | scope :| _ <- view stack state
-  , Just False <- HashMap.lookup (fst name) scope =
+  | Just False <- HashMap.lookup (fst name) (head $ view stack state) =
       Left $ ResolveError "Can't read local variable in own init" name
 resolveLocal name state = pure $ case calcDistance (fst name) (view stack state) of
   Just dist -> over dists (HashMap.insert name dist) state
   Nothing   -> state
-
-ftype :: Lens' (FunctionType, ClassType, Distances, NonEmpty Scope) FunctionType
-ftype f (a, b, c, d) = (,b,c,d) <$> f a
-
-ctype :: Lens' (FunctionType, ClassType, Distances, NonEmpty Scope) ClassType
-ctype f (a, b, c, d) = (a,,c,d) <$> f b
-
-dists :: Lens' (FunctionType, ClassType, Distances, NonEmpty Scope) Distances
-dists f (a, b, c, d) = (a,b,,d) <$> f c
-
-stack :: Lens' (FunctionType, ClassType, Distances, NonEmpty Scope) (NonEmpty Scope)
-stack f (a, b, c, d) = (a,b,c,) <$> f d
