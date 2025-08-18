@@ -12,15 +12,16 @@ import Resolver           (resolveFile)
 import Scanner            (scan)
 
 main :: IO ()
-main =
-  getArgs >>= \case
-    [] -> global >>= repl start
-    files -> forM_ files $ \file -> do
-      source <- readFile file
-      tokens <- chainIO scan $ Just source
-      stmts <- chainIO parse tokens
-      dists <- chainIO resolveFile stmts
-      endIO interpretFile stmts dists
+main = getArgs >>= \case
+  [] -> global >>= repl start
+  files -> forM_ files runFile
+
+runFile :: FilePath -> IO ()
+runFile file = readFile file
+  >>= chainIO scan . pure
+  >>= chainIO parse
+  >>= (>>=) <$> chainIO resolveFile
+  <*> endIO interpretFile
 
 chainIO :: (Show l) => (x -> Either l r) -> Maybe x -> IO (Maybe r)
 chainIO f mx = case traverse f mx of
@@ -28,7 +29,6 @@ chainIO f mx = case traverse f mx of
   Right r -> pure r
 
 endIO :: (Show l) => (x -> y -> IO (Either l ())) -> Maybe x -> Maybe y -> IO ()
-endIO f mx my =
-  sequenceA (liftA2 f mx my) >>= \case
-    Just (Left l) -> hPrint stderr l
-    _ -> pure ()
+endIO f mx my = sequenceA (liftA2 f mx my) >>= \case
+  Just (Left l) -> hPrint stderr l
+  _ -> pure ()

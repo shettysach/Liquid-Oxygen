@@ -24,7 +24,7 @@ type Parser a = NonEmpty Token -> Either ParseError (a, NonEmpty Token)
 -- Stmts
 
 declaration :: Parser Stmt
-declaration (t :| ts) = case fst t of
+declaration (t :| ts) = let ts' = fromList ts in case fst t of
   T.Var       -> varDeclaration ts'
   T.Fun       -> first S.Function <$> function ts'
   T.Class     -> classDeclaration ts'
@@ -35,8 +35,6 @@ declaration (t :| ts) = case fst t of
   T.For       -> for ts'
   T.Print     -> expression ts' >>= statement . first S.Print
   _           -> expression (t :| ts) >>= statement . first S.Expr
- where
-  ts' = fromList ts
 
 statement :: Parse Stmt
 statement (stmt, (fst -> T.Semicolon) :| ts) = Right (stmt, fromList ts)
@@ -270,7 +268,7 @@ call tokens@(h :| _) = primary tokens >>= call'
       _       -> Right ([arg], t' :| ts')
 
 primary :: Parser Expr
-primary (t :| ts) = case fst t of
+primary (t :| ts) = let ts' = fromList ts in case fst t of
   T.False'       -> Right (Literal $ Bool' False, ts')
   T.True'        -> Right (Literal $ Bool' True, ts')
   T.Nil          -> Right (Literal S.Nil, ts')
@@ -281,8 +279,6 @@ primary (t :| ts) = case fst t of
   T.Super        -> superExpr (t :| ts)
   T.LeftParen    -> grouping (t :| ts)
   _              -> Left $ ParseError "Expected expr" t
- where
-  ts' = fromList ts
 
 superExpr :: Parser Expr
 superExpr (t :| ts) = case fromList ts of
@@ -292,7 +288,7 @@ superExpr (t :| ts) = case fromList ts of
 
 grouping :: Parser Expr
 grouping (t :| ts) = do
-  (expr, t' :| ts') <- expression (fromList ts)
+  (expr, t' :| ts') <- expression $ fromList ts
   case fst t' of
     T.RightParen -> Right (Grouping expr, fromList ts')
     _            -> Left $ ParseError "Expected ')' after expr" t
