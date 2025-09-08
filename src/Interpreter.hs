@@ -1,7 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RecursiveDo         #-}
-{-# LANGUAGE TupleSections       #-}
 
 module Interpreter where
 
@@ -15,7 +14,6 @@ import Data.Foldable              (foldrM)
 import Data.Functor               ((<&>))
 import Data.HashMap.Strict        qualified as HashMap
 import Data.IORef                 (modifyIORef, newIORef, readIORef)
-
 import Environment
 import Error                      (RuntimeError (RuntimeError))
 import Position                   (lengthW)
@@ -25,7 +23,7 @@ interpretFile :: [Stmt] -> Distances -> IO (Either RuntimeError ())
 interpretFile stmts dists = global >>= runExceptT . interpretStmts stmts dists <&> void
 
 interpretRepl :: [Stmt] -> Distances -> Env -> IO (Either RuntimeError Env)
-interpretRepl stmts dists = fmap (fmap snd) . runExceptT . interpretStmts stmts dists
+interpretRepl stmts dists = (fmap . fmap) snd . runExceptT . interpretStmts stmts dists
 
 interpretStmts :: [Stmt] -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
 interpretStmts [] _ env = pure (Nil, env)
@@ -54,12 +52,12 @@ interpretStmts (stmt : stmts) dists env = case stmt of
         Just stmt' -> interpretStmts (stmt' : stmts) dists env'
         Nothing    -> interpretStmts stmts dists env'
   While cond stmt' -> while env
-   where
-    while env' = do
-      (cond', envC) <- evaluate cond dists env'
-      if isTruthy cond'
-        then interpretStmts [stmt'] dists envC >>= while . snd
-        else interpretStmts stmts dists envC
+    where
+      while env' = do
+        (cond', envC) <- evaluate cond dists env'
+        if isTruthy cond'
+          then interpretStmts [stmt'] dists envC >>= while . snd
+          else interpretStmts stmts dists envC
   Function fn -> mdo
     closure <- lift $ initialize name func env
     (name, func) <- lift $ interpretFunction fn dists closure
@@ -69,7 +67,7 @@ interpretStmts (stmt : stmts) dists env = case stmt of
     super' <- case superLit of
       Class' super' -> pure $ Just super'
       _             -> throwE $ RuntimeError "Superclass must be a class" name
-    envS <- liftIO $ liftIO (child env) >>= initialize "super" superLit
+    envS <- liftIO $ liftIO (child env') >>= initialize "super" superLit
     methods' <- liftIO $ mapMethods methods dists envS HashMap.empty
     let klass = ClsLit name super' methods'
     envC <- liftIO $ initialize (fst name) (Class' klass) env'
@@ -96,9 +94,7 @@ mapMethods (m : ms) dists closure mthds = do
   mapMethods ms dists closure $ HashMap.insert name func mthds
 
 evaluate :: Expr -> Distances -> Env -> ExceptT RuntimeError IO (Literal, Env)
-evaluate expr dists env = ExceptT $ do
-  (result, state) <- runStateT (runExceptT $ evalExpr expr) (dists, env)
-  pure $ result <&> (,snd state)
+evaluate expr dists env = ExceptT $ liftA2 (,) <$> fst <*> pure . snd . snd <$> (runStateT $ runExceptT $ evalExpr expr) (dists, env)
 
 type EnvState = ExceptT RuntimeError (StateT (Distances, Env) IO)
 
@@ -126,7 +122,7 @@ evalExpr expr = case expr of
     argLits <- mapM evalExpr (reverse argExprs)
     case calleeLit of
       Function' func           -> callFunction func argLits
-      NativeFn name func arity -> callFunction (FnLit (name, pos) func arity undefined) argLits
+      NativeFn name func arity -> lift get >>= flip (callFunction . FnLit (name, pos) func arity) argLits . snd
       Class' klass             -> callClass klass argLits
       literal                  -> throwE $ RuntimeError "Calling non-function/non-class" (show literal, pos)
   Get instExpr field -> do

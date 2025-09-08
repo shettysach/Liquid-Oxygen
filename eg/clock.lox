@@ -1,10 +1,10 @@
 print clock();
 print clock;
+
 {
-fun clock(a) {
-    print a;
+    fun clock(a) { print a; }
+
+    clock(1);
 }
 
-clock(1);
-}
 print "done";

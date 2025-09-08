@@ -29,4 +29,5 @@ executable liquid-oxygen
       transformers,
       time
     default-language: Haskell2010
+    default-extensions: StrictData
     ghc-options:      -O3 -Wall

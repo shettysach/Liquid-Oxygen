@@ -59,6 +59,8 @@ assignAt name value 0 (Env ref _) =
 assignAt name value d (Env _ (Just enc)) = assignAt name value (d - 1) enc
 assignAt name _ _ _ = pure . Left $ RuntimeError "Undefined variable" name
 
+--
+
 nativeFns :: HashMap.HashMap String Literal
 nativeFns = HashMap.fromList [("clock", clock)]
 
@@ -69,6 +71,8 @@ clock = NativeFn "clock" native 0
   native _ env = do
     time <- realToFrac <$> getPOSIXTime
     pure $ pure (Number' time, env)
+
+--
 
 type Scope = HashMap.HashMap String Bool
 
